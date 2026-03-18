@@ -9,9 +9,9 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.8"
 
@@ -22,7 +22,7 @@ jobs:
         run: pyinstaller StampTool-win.spec
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: StampTool-Windows
           path: dist/StampTool.exe
@@ -30,9 +30,9 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
@@ -43,7 +43,7 @@ jobs:
         run: pyinstaller -y StampTool.spec
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: StampTool-macOS
           path: dist/StampTool.app
