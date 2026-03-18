@@ -1,3 +1,0 @@
-([('StampTool',
-   '/Users/wethura/Opensource/stamp/dist/StampTool',
-   'EXECUTABLE')],)

@@ -43,7 +43,8 @@ def scale_stamp(img: Image.Image, page_w: int, stamp_size_ratio: float) -> Image
         target_w = 1
     ratio = target_w / img.width
     target_h = max(1, int(img.height * ratio))
-    return img.resize((target_w, target_h), Image.LANCZOS)
+    resample = getattr(Image, "LANCZOS", None) or getattr(Image, "ANTIALIAS")
+    return img.resize((target_w, target_h), resample)
 
 
 def to_png_bytes(img: Image.Image) -> bytes:
