@@ -9,7 +9,7 @@ class MainWindow(tk.Tk):
     def __init__(self, controller):
         super().__init__()
         self.controller = controller
-        self.title("印章工具")
+        self.title("盖章工具")
         self.geometry("1100x700")
         self.minsize(800, 500)
 
@@ -27,7 +27,7 @@ class MainWindow(tk.Tk):
             side=tk.LEFT, padx=2, pady=2)
         tk.Button(toolbar, text="打开章", command=self.controller.open_stamp).pack(
             side=tk.LEFT, padx=2, pady=2)
-        tk.Button(toolbar, text="导出 PDF", command=self.controller.export_pdf).pack(
+        tk.Button(toolbar, text="导出盖章文档", command=self.controller.export_pdf).pack(
             side=tk.LEFT, padx=2, pady=2)
 
         # Main area

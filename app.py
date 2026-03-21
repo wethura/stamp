@@ -123,8 +123,14 @@ class App:
         filter_name, filter_pattern = HandlerRegistry.get_output_filter(self.handler)
         default_ext = self.handler.default_output_extension()
 
+        # 生成默认文件名: {原始文件名称}-已盖章
+        import os
+        original_name = os.path.splitext(os.path.basename(self.doc_path))[0]
+        default_filename = f"{original_name}-已盖章{default_ext}"
+
         out_path = filedialog.asksaveasfilename(
             title="导出文档",
+            initialfile=default_filename,
             defaultextension=default_ext,
             filetypes=[(filter_name, filter_pattern)]
         )
