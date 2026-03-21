@@ -1,18 +1,17 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image
+from typing import Optional
 
-from processing.document import load_document, render_page, is_image_input
-from processing.stamp import load_stamp, scale_stamp
-from processing.exporter import export_pdf
+from processing import HandlerRegistry, load_stamp
+from processing.base import DocumentHandler
 from ui.main_window import MainWindow
 
 
 class App:
     def __init__(self):
+        self.handler: Optional[DocumentHandler] = None
         self.doc_path = None
-        self.fitz_doc = None
-        self.is_image = False
         self.pages = []  # list of PIL.Image (rendered pages)
 
         self.stamp_img = None  # RGBA, original unscaled
@@ -29,27 +28,42 @@ class App:
     # --- Document ---
 
     def open_document(self):
+        # 使用注册表动态生成文件过滤器
+        filters = HandlerRegistry.get_file_filters()
+
         path = filedialog.askopenfilename(
             title="打开文档",
-            filetypes=[
-                ("支持的文件", "*.pdf *.jpg *.jpeg *.png *.bmp *.tiff *.tif *.webp"),
-                ("PDF 文件", "*.pdf"),
-                ("图片文件", "*.jpg *.jpeg *.png *.bmp *.tiff *.tif *.webp"),
-            ]
+            filetypes=filters
         )
         if not path:
             return
-        try:
-            fitz_doc, pages = load_document(path)
-            self.doc_path = path
-            self.fitz_doc = fitz_doc
-            self.is_image = is_image_input(path)
-            self.pages = pages
-            self.current_preview_page = 0
-            self.selected_pages = set(range(len(pages)))
 
-            self.window.controls.set_pages(len(pages))
-            self.window.set_status(f"已加载: {path}  ({len(pages)} 页)")
+        try:
+            # 获取合适的处理器
+            handler = HandlerRegistry.get_handler(path)
+            if handler is None:
+                messagebox.showerror("错误", "不支持的文件格式")
+                return
+
+            # 关闭之前的文档
+            if self.handler is not None:
+                self.handler.close()
+
+            # 加载新文档
+            handler.load(path)
+            self.handler = handler
+            self.doc_path = path
+
+            # 渲染所有页面用于预览
+            self.pages = []
+            for i in range(handler.page_count()):
+                self.pages.append(handler.render_page(i))
+
+            self.current_preview_page = 0
+            self.selected_pages = set(range(len(self.pages)))
+
+            self.window.controls.set_pages(len(self.pages))
+            self.window.set_status(f"已加载: {path}  ({len(self.pages)} 页)")
             self._refresh_preview()
         except Exception as e:
             messagebox.showerror("加载失败", str(e))
@@ -95,7 +109,7 @@ class App:
     # --- Export ---
 
     def export_pdf(self):
-        if not self.doc_path:
+        if self.handler is None or self.doc_path is None:
             messagebox.showwarning("提示", "请先打开文档")
             return
         if self.stamp_img is None:
@@ -105,23 +119,25 @@ class App:
             messagebox.showwarning("提示", "请至少选择一页进行盖章")
             return
 
+        # 根据处理器类型确定输出格式
+        filter_name, filter_pattern = HandlerRegistry.get_output_filter(self.handler)
+        default_ext = self.handler.default_output_extension()
+
         out_path = filedialog.asksaveasfilename(
-            title="导出 PDF",
-            defaultextension=".pdf",
-            filetypes=[("PDF 文件", "*.pdf")]
+            title="导出文档",
+            defaultextension=default_ext,
+            filetypes=[(filter_name, filter_pattern)]
         )
         if not out_path:
             return
 
         try:
-            export_pdf(
-                src_path=self.doc_path,
-                is_image=self.is_image,
+            self.handler.export_with_stamp(
+                output_path=out_path,
                 stamp_img=self.stamp_img,
                 position_ratio=self.position_ratio,
                 stamp_size_ratio=self.stamp_size_ratio,
                 selected_pages=self.selected_pages,
-                output_path=out_path,
             )
             self.window.set_status(f"已导出: {out_path}")
             messagebox.showinfo("导出成功", f"已保存到:\n{out_path}")

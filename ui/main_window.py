@@ -1,4 +1,6 @@
 import tkinter as tk
+from PIL import Image, ImageTk
+import os
 from ui.preview_canvas import PreviewCanvas
 from ui.controls_panel import ControlsPanel
 
@@ -10,6 +12,9 @@ class MainWindow(tk.Tk):
         self.title("印章工具")
         self.geometry("1100x700")
         self.minsize(800, 500)
+
+        # 设置窗口图标
+        self._set_icon()
 
         self._build_ui()
 
@@ -53,3 +58,18 @@ class MainWindow(tk.Tk):
 
     def set_status(self, msg: str):
         self._status_var.set(msg)
+
+    def _set_icon(self):
+        """设置窗口图标"""
+        # 获取图标路径
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets', 'icon.png')
+        if os.path.exists(icon_path):
+            icon_img = Image.open(icon_path)
+            self.icon_photo = ImageTk.PhotoImage(icon_img)
+            self.iconphoto(True, self.icon_photo)
+            # macOS Dock 图标
+            try:
+                self.dock_icon = ImageTk.PhotoImage(icon_img)
+                self.call('wm', 'iconphoto', self._w, self.dock_icon)
+            except:
+                pass
