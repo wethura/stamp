@@ -4,3 +4,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.claude
+openspec
+CLAUDE.md
+
+.DS_Store
