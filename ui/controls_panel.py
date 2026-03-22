@@ -71,7 +71,7 @@ class ControlsPanel(tk.Frame):
         scroll = tk.Scrollbar(list_frame)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self._stamp_canvas = tk.Canvas(list_frame, height=150, yscrollcommand=scroll.set)
+        self._stamp_canvas = tk.Canvas(list_frame, height=170, yscrollcommand=scroll.set)
         self._stamp_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.config(command=self._stamp_canvas.yview)
 
@@ -171,33 +171,37 @@ class ControlsPanel(tk.Frame):
 
         self._stamps = self._stamp_manager.list_stamps()
 
-        for stamp in self._stamps:
-            self._add_stamp_item(stamp)
+        # 使用 grid 布局，一行2个
+        for idx, stamp in enumerate(self._stamps):
+            row = idx // 2
+            col = idx % 2
+            self._add_stamp_item(stamp, row, col)
 
         self._update_edit_controls()
 
-    def _add_stamp_item(self, stamp: StampData):
-        """添加单个章项到列表"""
+    def _add_stamp_item(self, stamp: StampData, row: int, col: int):
+        """添加单个章项到列表（grid布局）"""
         container = tk.Frame(self._stamp_inner, relief=tk.RIDGE, bd=1, cursor="hand2")
-        container.pack(fill=tk.X, pady=2, padx=2)
+        container.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
 
-        # 生成缩略图
+        # 配置列权重，让两列等宽
+        self._stamp_inner.columnconfigure(col, weight=1)
+
+        # 生成缩略图（更大尺寸）
         img = stamp.get_image()
-        thumb_size = 40
+        thumb_size = 100
         img.thumbnail((thumb_size, thumb_size), Image.LANCZOS)
         photo = ImageTk.PhotoImage(img)
         self._stamp_previews[stamp.id] = photo
 
-        # 顶部：缩略图 + 删除按钮
-        top_frame = tk.Frame(container, cursor="hand2")
-        top_frame.pack(fill=tk.X, padx=2, pady=2)
-
-        lbl_img = tk.Label(top_frame, image=photo, cursor="hand2")
-        lbl_img.pack(side=tk.LEFT, padx=2)
-
-        btn_del = tk.Label(top_frame, text="✕", fg="red", cursor="hand2", font=("Arial", 10))
-        btn_del.pack(side=tk.RIGHT, padx=2)
+        # 顶部：删除按钮在右上角（绝对定位）
+        btn_del = tk.Label(container, text="✕", fg="red", cursor="hand2", font=("Arial", 10, "bold"))
+        btn_del.place(relx=1.0, rely=0.0, x=-2, y=2, anchor="ne")
         btn_del.bind("<Button-1>", lambda e, sid=stamp.id: self._delete_stamp(sid))
+
+        # 中间：缩略图
+        lbl_img = tk.Label(container, image=photo, cursor="hand2")
+        lbl_img.pack(padx=5, pady=(5, 2))
 
         # 底部：名称 + 选中状态标记
         name_frame = tk.Frame(container, cursor="hand2")
@@ -223,7 +227,6 @@ class ControlsPanel(tk.Frame):
             self._notify_stamp_selection_changed()
 
         container.bind("<Button-1>", toggle_selection)
-        top_frame.bind("<Button-1>", toggle_selection)
         lbl_img.bind("<Button-1>", toggle_selection)
         name_frame.bind("<Button-1>", toggle_selection)
         lbl_name.bind("<Button-1>", toggle_selection)
