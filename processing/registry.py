@@ -60,13 +60,13 @@ class HandlerRegistry:
         # 按处理器分组
         for handler_class in cls._handlers:
             exts = handler_class.extensions()
-            # 生成 "*.pdf;*.PDF" 格式
-            ext_patterns = ";".join(f"*{ext}" for ext in exts)
+            # 生成 "*.pdf" "*.PDF" 格式（macOS 兼容）
+            ext_patterns = " ".join(f"*{ext}" for ext in exts)
             filters.append((handler_class.display_name(), ext_patterns))
 
         # 添加"所有支持的文件"过滤器
         all_exts = cls.all_extensions()
-        all_patterns = ";".join(f"*{ext}" for ext in sorted(all_exts))
+        all_patterns = " ".join(f"*{ext}" for ext in sorted(all_exts))
         filters.insert(0, ("所有支持的文件", all_patterns))
 
         return filters
