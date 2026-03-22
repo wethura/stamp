@@ -1,26 +1,34 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image
-from typing import Optional
+from typing import Optional, List
 
-from processing import HandlerRegistry, load_stamp
+from processing import HandlerRegistry
 from processing.base import DocumentHandler
+from processing.stamp_manager import StampManager
 from ui.main_window import MainWindow
+from ui.controls_panel import StampSelection
 
 
 class App:
     def __init__(self):
         self.handler: Optional[DocumentHandler] = None
         self.doc_path = None
-        self.pages = []  # list of PIL.Image (rendered pages)
+        self.pages: List[Image.Image] = []
 
-        self.stamp_img = None  # RGBA, original unscaled
-        self.position_ratio = (0.7, 0.7)
-        self.stamp_size_ratio = 0.2
+        # 章管理器
+        self.stamp_manager = StampManager()
+
+        # 待盖章的章列表（用户选中要盖到文档上的章）
+        self.selected_stamps: List[StampSelection] = []
+
         self.selected_pages = set()
         self.current_preview_page = 0
 
         self.window = MainWindow(self)
+
+        # 设置章管理器到控制面板
+        self.window.controls.set_stamp_manager(self.stamp_manager)
 
     def run(self):
         self.window.mainloop()
@@ -28,7 +36,6 @@ class App:
     # --- Document ---
 
     def open_document(self):
-        # 使用注册表动态生成文件过滤器
         filters = HandlerRegistry.get_file_filters()
 
         path = filedialog.askopenfilename(
@@ -39,22 +46,18 @@ class App:
             return
 
         try:
-            # 获取合适的处理器
             handler = HandlerRegistry.get_handler(path)
             if handler is None:
                 messagebox.showerror("错误", "不支持的文件格式")
                 return
 
-            # 关闭之前的文档
             if self.handler is not None:
                 self.handler.close()
 
-            # 加载新文档
             handler.load(path)
             self.handler = handler
             self.doc_path = path
 
-            # 渲染所有页面用于预览
             self.pages = []
             for i in range(handler.page_count()):
                 self.pages.append(handler.render_page(i))
@@ -68,36 +71,27 @@ class App:
         except Exception as e:
             messagebox.showerror("加载失败", str(e))
 
-    # --- Stamp ---
+    # --- Stamp Selection Callback ---
 
-    def open_stamp(self):
-        path = filedialog.askopenfilename(
-            title="打开章",
-            filetypes=[
-                ("图片文件", "*.jpg *.jpeg *.png *.bmp *.tiff *.tif *.webp"),
-            ]
-        )
-        if not path:
-            return
-        try:
-            self.stamp_img = load_stamp(path)
-            # Default: bottom-right, accounting for stamp size
-            self.position_ratio = self._clamp(0.75, 0.75)
-            self.window.set_status(f"已加载章: {path}")
-            self._refresh_preview()
-        except Exception as e:
-            messagebox.showerror("加载章失败", str(e))
+    def on_stamp_selection_changed(self, stamps: List[StampSelection]):
+        """待盖章的章变化回调"""
+        self.selected_stamps = stamps
+        self._refresh_preview()
+
+    def on_editing_stamp_changed(self, stamp_id: Optional[str]):
+        """正在编辑的章变化回调"""
+        # 更新控制面板的编辑状态显示
+        self.window.controls.set_editing_stamp(stamp_id)
+        self._refresh_preview()
+
+    def on_stamp_position_changed(self, stamp_id: str, pos_x: float, pos_y: float):
+        """章位置变化回调（拖拽）"""
+        self.stamp_manager.update_stamp(stamp_id, pos_x=pos_x, pos_y=pos_y)
+        # 重新获取所有选中章的最新数据
+        self.selected_stamps = self.window.controls.get_selected_stamps()
+        self._refresh_preview()
 
     # --- Callbacks ---
-
-    def on_position_change(self, x: float, y: float):
-        self.position_ratio = self._clamp(x, y)
-        self._refresh_preview()
-
-    def on_size_change(self, ratio: float):
-        self.stamp_size_ratio = ratio
-        self.position_ratio = self._clamp(*self.position_ratio)
-        self._refresh_preview()
 
     def on_pages_changed(self, selected: set):
         self.selected_pages = selected
@@ -112,18 +106,16 @@ class App:
         if self.handler is None or self.doc_path is None:
             messagebox.showwarning("提示", "请先打开文档")
             return
-        if self.stamp_img is None:
-            messagebox.showwarning("提示", "请先打开章")
+        if not self.selected_stamps:
+            messagebox.showwarning("提示", "请至少选择一个章")
             return
         if not self.selected_pages:
             messagebox.showwarning("提示", "请至少选择一页进行盖章")
             return
 
-        # 根据处理器类型确定输出格式
         filter_name, filter_pattern = HandlerRegistry.get_output_filter(self.handler)
         default_ext = self.handler.default_output_extension()
 
-        # 生成默认文件名: {原始文件名称}-已盖章
         import os
         original_name = os.path.splitext(os.path.basename(self.doc_path))[0]
         default_filename = f"{original_name}-已盖章{default_ext}"
@@ -138,40 +130,53 @@ class App:
             return
 
         try:
-            self.handler.export_with_stamp(
-                output_path=out_path,
-                stamp_img=self.stamp_img,
-                position_ratio=self.position_ratio,
-                stamp_size_ratio=self.stamp_size_ratio,
-                selected_pages=self.selected_pages,
-            )
+            self._export_with_multiple_stamps(out_path)
             self.window.set_status(f"已导出: {out_path}")
             messagebox.showinfo("导出成功", f"已保存到:\n{out_path}")
         except Exception as e:
             messagebox.showerror("导出失败", str(e))
 
-    # --- Internal ---
+    def _export_with_multiple_stamps(self, output_path: str):
+        """导出时叠加多个章"""
+        first_stamp = self.selected_stamps[0]
 
-    def _clamp(self, x: float, y: float) -> tuple:
-        """Clamp position so stamp stays within page bounds."""
-        sr = self.stamp_size_ratio
-        if self.stamp_img:
-            aspect = self.stamp_img.height / self.stamp_img.width
-        else:
-            aspect = 1.0
-        sh = sr * aspect
-        x = max(0.0, min(x, 1.0 - sr))
-        y = max(0.0, min(y, 1.0 - sh))
-        return (x, y)
+        self.handler.export_with_stamp(
+            output_path=output_path,
+            stamp_img=first_stamp.stamp_img,
+            position_ratio=(first_stamp.pos_x, first_stamp.pos_y),
+            stamp_size_ratio=first_stamp.size_ratio,
+            selected_pages=self.selected_pages,
+        )
+
+        if len(self.selected_stamps) > 1:
+            from processing.handlers.pdf_handler import PDFHandler
+            temp_handler = PDFHandler()
+            temp_handler.load(output_path)
+
+            for stamp_sel in self.selected_stamps[1:]:
+                temp_path = output_path + ".tmp"
+                temp_handler.export_with_stamp(
+                    output_path=temp_path,
+                    stamp_img=stamp_sel.stamp_img,
+                    position_ratio=(stamp_sel.pos_x, stamp_sel.pos_y),
+                    stamp_size_ratio=stamp_sel.size_ratio,
+                    selected_pages=self.selected_pages,
+                )
+                temp_handler.close()
+
+                import shutil
+                shutil.move(temp_path, output_path)
+
+                temp_handler = PDFHandler()
+                temp_handler.load(output_path)
+
+            temp_handler.close()
+
+    # --- Internal ---
 
     def _refresh_preview(self):
         if not self.pages:
             return
         idx = min(self.current_preview_page, len(self.pages) - 1)
         page_img = self.pages[idx]
-        self.window.preview.update_preview(
-            page_img,
-            self.stamp_img,
-            self.position_ratio,
-            self.stamp_size_ratio,
-        )
+        self.window.preview.update_preview(page_img, self.selected_stamps)

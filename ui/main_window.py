@@ -10,12 +10,10 @@ class MainWindow(tk.Tk):
         super().__init__()
         self.controller = controller
         self.title("盖章工具")
-        self.geometry("1100x700")
+        self.geometry("1100x750")
         self.minsize(800, 500)
 
-        # 设置窗口图标
         self._set_icon()
-
         self._build_ui()
 
     def _build_ui(self):
@@ -24,8 +22,6 @@ class MainWindow(tk.Tk):
         toolbar.pack(side=tk.TOP, fill=tk.X)
 
         tk.Button(toolbar, text="打开文档", command=self.controller.open_document).pack(
-            side=tk.LEFT, padx=2, pady=2)
-        tk.Button(toolbar, text="打开章", command=self.controller.open_stamp).pack(
             side=tk.LEFT, padx=2, pady=2)
         tk.Button(toolbar, text="导出盖章文档", command=self.controller.export_pdf).pack(
             side=tk.LEFT, padx=2, pady=2)
@@ -36,7 +32,8 @@ class MainWindow(tk.Tk):
 
         self.preview = PreviewCanvas(
             main,
-            on_position_change=self.controller.on_position_change,
+            on_stamp_position_changed=self.controller.on_stamp_position_changed,
+            on_editing_stamp_changed=self.controller.on_editing_stamp_changed,
             bg="#2b2b2b"
         )
         self.preview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -44,9 +41,10 @@ class MainWindow(tk.Tk):
         self.controls = ControlsPanel(
             main,
             on_pages_changed=self.controller.on_pages_changed,
-            on_size_changed=self.controller.on_size_change,
             on_preview_page_changed=self.controller.on_preview_page_change,
-            width=200
+            on_stamp_selection_changed=self.controller.on_stamp_selection_changed,
+            on_editing_stamp_changed=self.controller.on_editing_stamp_changed,
+            width=240
         )
         self.controls.pack(side=tk.RIGHT, fill=tk.Y)
 
@@ -60,14 +58,11 @@ class MainWindow(tk.Tk):
         self._status_var.set(msg)
 
     def _set_icon(self):
-        """设置窗口图标"""
-        # 获取图标路径
         icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets', 'icon.png')
         if os.path.exists(icon_path):
             icon_img = Image.open(icon_path)
             self.icon_photo = ImageTk.PhotoImage(icon_img)
             self.iconphoto(True, self.icon_photo)
-            # macOS Dock 图标
             try:
                 self.dock_icon = ImageTk.PhotoImage(icon_img)
                 self.call('wm', 'iconphoto', self._w, self.dock_icon)
