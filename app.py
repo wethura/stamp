@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image
 from typing import Optional, List
+import os
+import shlex
 
 from processing import HandlerRegistry
 from processing.base import DocumentHandler
@@ -45,12 +47,66 @@ class App:
         if not path:
             return
 
-        try:
-            handler = HandlerRegistry.get_handler(path)
-            if handler is None:
-                messagebox.showerror("错误", "不支持的文件格式")
-                return
+        handler = HandlerRegistry.get_handler(path)
+        if handler is None:
+            messagebox.showerror("错误", "不支持的文件格式")
+            return
 
+        self._load_document(path, handler)
+
+    # --- Stamp Selection Callback ---
+
+    def on_stamp_selection_changed(self, stamps: List[StampSelection]):
+        """待盖章的章变化回调"""
+        self.selected_stamps = stamps
+        self._refresh_preview()
+
+    def on_editing_stamp_changed(self, stamp_id: Optional[str]):
+        """正在编辑的章变化回调"""
+        # 更新控制面板的编辑状态显示
+        self.window.controls.set_editing_stamp(stamp_id)
+        self._refresh_preview()
+
+    def on_file_dropped(self, drop_data: str):
+        """处理拖入文件"""
+        # 解析拖放数据中的文件路径
+        try:
+            paths = shlex.split(drop_data)
+        except ValueError:
+            paths = [drop_data.strip()]
+
+        # 过滤掉空路径
+        paths = [p for p in paths if p]
+
+        if len(paths) > 1:
+            self.window.set_status("请每次拖入一个文件")
+            return
+
+        if not paths:
+            return
+
+        path = paths[0]
+
+        # 去除可能的花括号（Windows tkdnd 格式）
+        path = path.strip("{}")
+
+        # 检查文件是否存在
+        if not os.path.exists(path):
+            self.window.set_status("文件不存在")
+            return
+
+        # 检查文件格式是否支持
+        handler = HandlerRegistry.get_handler(path)
+        if handler is None:
+            self.window.set_status("不支持的文件格式")
+            return
+
+        # 加载文件
+        self._load_document(path, handler)
+
+    def _load_document(self, path: str, handler):
+        """加载文档（供 open_document 和 on_file_dropped 共用）"""
+        try:
             if self.handler is not None:
                 self.handler.close()
 
@@ -70,19 +126,6 @@ class App:
             self._refresh_preview()
         except Exception as e:
             messagebox.showerror("加载失败", str(e))
-
-    # --- Stamp Selection Callback ---
-
-    def on_stamp_selection_changed(self, stamps: List[StampSelection]):
-        """待盖章的章变化回调"""
-        self.selected_stamps = stamps
-        self._refresh_preview()
-
-    def on_editing_stamp_changed(self, stamp_id: Optional[str]):
-        """正在编辑的章变化回调"""
-        # 更新控制面板的编辑状态显示
-        self.window.controls.set_editing_stamp(stamp_id)
-        self._refresh_preview()
 
     def on_stamp_position_changed(self, stamp_id: str, pos_x: float, pos_y: float):
         """章位置变化回调（拖拽）"""

@@ -4,7 +4,7 @@ from PIL import Image, ImageTk
 from typing import Optional, List, Callable
 from dataclasses import dataclass
 
-from processing.stamp import load_stamp
+from processing.stamp import load_stamp, apply_opacity
 from processing.stamp_manager import StampData
 
 
@@ -16,6 +16,7 @@ class StampSelection:
     size_ratio: float
     pos_x: float
     pos_y: float
+    opacity: float = 1.0
 
 
 class ControlsPanel(tk.Frame):
@@ -98,6 +99,18 @@ class ControlsPanel(tk.Frame):
                                        variable=self._size_var, command=self._on_size_changed)
         self._size_slider.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=5)
         self._size_slider.config(state='disabled')
+
+        # 透明度滑块
+        opacity_frame = tk.Frame(self._edit_frame)
+        opacity_frame.pack(fill=tk.X, pady=2)
+        tk.Label(opacity_frame, text="透明度:").pack(side=tk.LEFT)
+        self._opacity_label = tk.Label(opacity_frame, text="100%", width=5)
+        self._opacity_label.pack(side=tk.RIGHT)
+        self._opacity_var = tk.DoubleVar(value=100.0)
+        self._opacity_slider = ttk.Scale(opacity_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                                          variable=self._opacity_var, command=self._on_opacity_changed)
+        self._opacity_slider.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=5)
+        self._opacity_slider.config(state='disabled')
 
         # === 预览页导航 ===
         nav_frame = tk.LabelFrame(self, text="预览页", padx=5, pady=5)
@@ -194,11 +207,6 @@ class ControlsPanel(tk.Frame):
         photo = ImageTk.PhotoImage(img)
         self._stamp_previews[stamp.id] = photo
 
-        # 顶部：删除按钮在右上角（绝对定位）
-        btn_del = tk.Label(container, text="✕", fg="red", cursor="hand2", font=("Arial", 10, "bold"))
-        btn_del.place(relx=1.0, rely=0.0, x=-2, y=2, anchor="ne")
-        btn_del.bind("<Button-1>", lambda e, sid=stamp.id: self._delete_stamp(sid))
-
         # 中间：缩略图
         lbl_img = tk.Label(container, image=photo, cursor="hand2")
         lbl_img.pack(padx=5, pady=(5, 2))
@@ -216,6 +224,12 @@ class ControlsPanel(tk.Frame):
 
         self._selected_dots[stamp.id] = selected_dot
         self._update_stamp_dot(stamp.id)
+
+        # 删除按钮（显式文字按钮在底部）
+        btn_del = tk.Label(container, text="删除", fg="red", cursor="hand2",
+                           font=("Arial", 9, "underline"))
+        btn_del.pack(fill=tk.X, padx=2, pady=(0, 2))
+        btn_del.bind("<Button-1>", lambda e, sid=stamp.id: self._delete_stamp(sid))
 
         # 点击整个容器任意位置切换选中状态（除了删除按钮）
         def toggle_selection(e, sid=stamp.id):
@@ -246,15 +260,23 @@ class ControlsPanel(tk.Frame):
             self._update_stamp_dot(sid)
 
     def _delete_stamp(self, stamp_id: str):
-        """删除章"""
-        if self._stamp_manager:
-            self._stamp_manager.delete_stamp(stamp_id)
-            self._selected_stamp_ids.discard(stamp_id)
-            if self._editing_stamp_id == stamp_id:
-                self._editing_stamp_id = None
-            self._refresh_stamp_list()
-            self._notify_stamp_selection_changed()
-            self._notify_editing_stamp_changed()
+        """删除章 - 弹出确认对话框"""
+        if not self._stamp_manager:
+            return
+
+        stamp = self._stamp_manager.get_stamp(stamp_id)
+        stamp_name = stamp.name if stamp else "该章"
+
+        if not messagebox.askyesno("确认删除", f"确定要删除「{stamp_name}」吗？"):
+            return
+
+        self._stamp_manager.delete_stamp(stamp_id)
+        self._selected_stamp_ids.discard(stamp_id)
+        if self._editing_stamp_id == stamp_id:
+            self._editing_stamp_id = None
+        self._refresh_stamp_list()
+        self._notify_stamp_selection_changed()
+        self._notify_editing_stamp_changed()
 
     def set_editing_stamp(self, stamp_id: str):
         """设置正在编辑的章（由预览区域点击触发）"""
@@ -267,6 +289,11 @@ class ControlsPanel(tk.Frame):
         if not self._editing_stamp_id or not self._stamp_manager:
             self._editing_label.config(text="点击预览区域的章进行编辑", fg="gray")
             self._size_slider.config(state='disabled')
+            self._size_var.set(20.0)
+            self._size_label.config(text="20%")
+            self._opacity_slider.config(state='disabled')
+            self._opacity_var.set(100.0)
+            self._opacity_label.config(text="100%")
             return
 
         stamp = self._stamp_manager.get_stamp(self._editing_stamp_id)
@@ -275,12 +302,24 @@ class ControlsPanel(tk.Frame):
             self._size_var.set(stamp.size_ratio * 100)
             self._size_label.config(text=f"{stamp.size_ratio * 100:.0f}%")
             self._size_slider.config(state='normal')
+            opacity_pct = getattr(stamp, 'opacity', 1.0) * 100
+            self._opacity_var.set(opacity_pct)
+            self._opacity_label.config(text=f"{opacity_pct:.0f}%")
+            self._opacity_slider.config(state='normal')
 
     def _on_size_changed(self, val):
         pct = float(val)
         self._size_label.config(text=f"{pct:.0f}%")
         if self._stamp_manager and self._editing_stamp_id:
             self._stamp_manager.update_stamp(self._editing_stamp_id, size_ratio=pct / 100.0)
+            # 更新选中章的数据，通知预览刷新
+            self._notify_stamp_selection_changed()
+
+    def _on_opacity_changed(self, val):
+        pct = float(val)
+        self._opacity_label.config(text=f"{pct:.0f}%")
+        if self._stamp_manager and self._editing_stamp_id:
+            self._stamp_manager.update_stamp(self._editing_stamp_id, opacity=pct / 100.0)
             # 更新选中章的数据，通知预览刷新
             self._notify_stamp_selection_changed()
 
@@ -299,12 +338,17 @@ class ControlsPanel(tk.Frame):
         result = []
         for stamp in self._stamps:
             if stamp.id in self._selected_stamp_ids:
+                img = stamp.get_image()
+                opacity = getattr(stamp, 'opacity', 1.0)
+                if opacity < 1.0:
+                    img = apply_opacity(img, opacity)
                 result.append(StampSelection(
                     stamp_id=stamp.id,
-                    stamp_img=stamp.get_image(),
+                    stamp_img=img,
                     size_ratio=stamp.size_ratio,
                     pos_x=stamp.pos_x,
-                    pos_y=stamp.pos_y
+                    pos_y=stamp.pos_y,
+                    opacity=opacity
                 ))
         return result
 
@@ -314,12 +358,17 @@ class ControlsPanel(tk.Frame):
             return None
         stamp = self._stamp_manager.get_stamp(self._editing_stamp_id)
         if stamp:
+            img = stamp.get_image()
+            opacity = getattr(stamp, 'opacity', 1.0)
+            if opacity < 1.0:
+                img = apply_opacity(img, opacity)
             return StampSelection(
                 stamp_id=stamp.id,
-                stamp_img=stamp.get_image(),
+                stamp_img=img,
                 size_ratio=stamp.size_ratio,
                 pos_x=stamp.pos_x,
-                pos_y=stamp.pos_y
+                pos_y=stamp.pos_y,
+                opacity=opacity
             )
         return None
 

@@ -52,3 +52,14 @@ def to_png_bytes(img: Image.Image) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def apply_opacity(img: Image.Image, opacity: float) -> Image.Image:
+    """Apply opacity multiplier to image alpha channel."""
+    if opacity >= 1.0:
+        return img
+    img = img.copy()
+    alpha = img.getchannel("A")
+    alpha = alpha.point(lambda p: int(p * opacity))
+    img.putalpha(alpha)
+    return img

@@ -3,6 +3,7 @@ from PIL import Image, ImageTk
 import os
 from ui.preview_canvas import PreviewCanvas
 from ui.controls_panel import ControlsPanel
+from ui.drop_target import setup_drop_target
 
 
 class MainWindow(tk.Tk):
@@ -55,6 +56,9 @@ class MainWindow(tk.Tk):
         status = tk.Label(self, textvariable=self._status_var,
                           bd=1, relief=tk.SUNKEN, anchor=tk.W)
         status.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # 拖放支持
+        self._tkdnd_available = setup_drop_target(self, self.controller)
 
     def set_status(self, msg: str):
         self._status_var.set(msg)
@@ -126,6 +130,9 @@ class MainFrame(tk.Frame):
         status = tk.Label(self, textvariable=self._status_var,
                           bd=1, relief=tk.SUNKEN, anchor=tk.W)
         status.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # 拖放支持
+        self._tkdnd_available = setup_drop_target(self, self.controller)
 
     def set_status(self, msg: str):
         self._status_var.set(msg)
