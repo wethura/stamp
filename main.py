@@ -26,9 +26,10 @@ def main():
     app.handler = None
     app.doc_path = None
     app.pages = []
-    app.selected_stamps = []
+    app.instance_manager = None
     app.selected_pages = set()
     app.current_preview_page = 0
+    app._selected_instance_id = None
     app.stamp_manager = StampManager()
 
     splash.update_progress(100, "加载完成!")

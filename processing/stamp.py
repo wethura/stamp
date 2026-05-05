@@ -63,3 +63,15 @@ def apply_opacity(img: Image.Image, opacity: float) -> Image.Image:
     alpha = alpha.point(lambda p: int(p * opacity))
     img.putalpha(alpha)
     return img
+
+
+def apply_rotation(img: Image.Image, angle: float) -> Image.Image:
+    """Rotate image around center, expand canvas, preserve transparency."""
+    if angle == 0:
+        return img
+    return img.rotate(
+        angle,
+        expand=True,
+        resample=getattr(Image, "BICUBIC", Image.LANCZOS),
+        fillcolor=(0, 0, 0, 0)
+    )

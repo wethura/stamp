@@ -5,7 +5,7 @@ from typing import Set, Tuple, Optional
 import io
 
 from processing.base import DocumentHandler
-from processing.stamp import scale_stamp, to_png_bytes, apply_opacity
+from processing.stamp import scale_stamp, to_png_bytes
 
 
 class PDFHandler(DocumentHandler):
@@ -92,7 +92,6 @@ class PDFHandler(DocumentHandler):
             ph = page.rect.height
 
             scaled = scale_stamp(stamp_img, int(pw), stamp_size_ratio)
-            scaled = apply_opacity(scaled, getattr(stamp_img, '_opacity', 1.0))
             sw, sh = scaled.size
             x = x_ratio * pw
             y = y_ratio * ph

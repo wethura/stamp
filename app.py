@@ -1,15 +1,17 @@
-import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image
-from typing import Optional, List
+from typing import Optional, List, Dict
 import os
 import shlex
+import shutil
 
 from processing import HandlerRegistry
 from processing.base import DocumentHandler
 from processing.stamp_manager import StampManager
+from processing.stamp_instance import StampInstance, StampInstanceManager
+from processing.stamp import apply_opacity, apply_rotation
+from processing.handlers.pdf_handler import PDFHandler
 from ui.main_window import MainWindow
-from ui.controls_panel import StampSelection
 
 
 class App:
@@ -18,18 +20,14 @@ class App:
         self.doc_path = None
         self.pages: List[Image.Image] = []
 
-        # 章管理器
         self.stamp_manager = StampManager()
-
-        # 待盖章的章列表（用户选中要盖到文档上的章）
-        self.selected_stamps: List[StampSelection] = []
+        self.instance_manager: Optional[StampInstanceManager] = None
 
         self.selected_pages = set()
         self.current_preview_page = 0
+        self._selected_instance_id: Optional[str] = None
 
         self.window = MainWindow(self)
-
-        # 设置章管理器到控制面板
         self.window.controls.set_stamp_manager(self.stamp_manager)
 
     def run(self):
@@ -54,28 +52,12 @@ class App:
 
         self._load_document(path, handler)
 
-    # --- Stamp Selection Callback ---
-
-    def on_stamp_selection_changed(self, stamps: List[StampSelection]):
-        """待盖章的章变化回调"""
-        self.selected_stamps = stamps
-        self._refresh_preview()
-
-    def on_editing_stamp_changed(self, stamp_id: Optional[str]):
-        """正在编辑的章变化回调"""
-        # 更新控制面板的编辑状态显示
-        self.window.controls.set_editing_stamp(stamp_id)
-        self._refresh_preview()
-
     def on_file_dropped(self, drop_data: str):
-        """处理拖入文件"""
-        # 解析拖放数据中的文件路径
         try:
             paths = shlex.split(drop_data)
         except ValueError:
             paths = [drop_data.strip()]
 
-        # 过滤掉空路径
         paths = [p for p in paths if p]
 
         if len(paths) > 1:
@@ -86,26 +68,20 @@ class App:
             return
 
         path = paths[0]
-
-        # 去除可能的花括号（Windows tkdnd 格式）
         path = path.strip("{}")
 
-        # 检查文件是否存在
         if not os.path.exists(path):
             self.window.set_status("文件不存在")
             return
 
-        # 检查文件格式是否支持
         handler = HandlerRegistry.get_handler(path)
         if handler is None:
             self.window.set_status("不支持的文件格式")
             return
 
-        # 加载文件
         self._load_document(path, handler)
 
     def _load_document(self, path: str, handler):
-        """加载文档（供 open_document 和 on_file_dropped 共用）"""
         try:
             if self.handler is not None:
                 self.handler.close()
@@ -118,30 +94,85 @@ class App:
             for i in range(handler.page_count()):
                 self.pages.append(handler.render_page(i))
 
+            self.instance_manager = StampInstanceManager()
             self.current_preview_page = 0
             self.selected_pages = set(range(len(self.pages)))
+            self._selected_instance_id = None
 
             self.window.controls.set_pages(len(self.pages))
+            self.window.controls.set_instance_manager(self.instance_manager)
             self.window.set_status(f"已加载: {path}  ({len(self.pages)} 页)")
             self._refresh_preview()
         except Exception as e:
             messagebox.showerror("加载失败", str(e))
 
-    def on_stamp_position_changed(self, stamp_id: str, pos_x: float, pos_y: float):
-        """章位置变化回调（拖拽）"""
-        self.stamp_manager.update_stamp(stamp_id, pos_x=pos_x, pos_y=pos_y)
-        # 重新获取所有选中章的最新数据
-        self.selected_stamps = self.window.controls.get_selected_stamps()
+    # --- Instance Management ---
+
+    def create_instance_from_template(self, template_id: str):
+        """Double-click template to create instance on current page"""
+        if self.instance_manager is None:
+            return
+
+        instance = self.instance_manager.add_instance(template_id, self.current_preview_page)
+        self._selected_instance_id = instance.instance_id
+        self.window.controls.set_editing_instance(instance.instance_id)
         self._refresh_preview()
 
-    # --- Callbacks ---
+    def delete_instance(self, instance_id: str):
+        """Delete a stamp instance"""
+        if self.instance_manager is None:
+            return
+
+        self.instance_manager.remove_instance(instance_id)
+        if self._selected_instance_id == instance_id:
+            self._selected_instance_id = None
+            self.window.controls.set_editing_instance(None)
+        self._refresh_preview()
+
+    def on_instance_position_changed(self, instance_id: str, pos_x: float, pos_y: float):
+        """Instance drag position changed"""
+        if self.instance_manager is None:
+            return
+        self.instance_manager.update_instance(instance_id, pos_x=pos_x, pos_y=pos_y)
+        self._refresh_preview()
+
+    def on_instance_selected(self, instance_id: Optional[str]):
+        """Instance selected in preview"""
+        self._selected_instance_id = instance_id
+        self.window.controls.set_editing_instance(instance_id)
+
+    def update_instance_property(self, instance_id: str, **kwargs):
+        """Update instance property from slider"""
+        if self.instance_manager is None:
+            return
+        self.instance_manager.update_instance(instance_id, **kwargs)
+        self._refresh_preview()
+
+    # --- Page Navigation ---
 
     def on_pages_changed(self, selected: set):
         self.selected_pages = selected
 
     def on_preview_page_change(self, idx: int):
         self.current_preview_page = idx
+        self._selected_instance_id = None
+        self.window.controls.set_editing_instance(None)
         self._refresh_preview()
+
+    # --- Preview Data ---
+
+    def get_page_stamp_data(self, page_index: int) -> List[StampInstance]:
+        """Get stamp instances for a page with resolved template images"""
+        if self.instance_manager is None:
+            return []
+        return self.instance_manager.get_page_instances(page_index)
+
+    def get_template_image(self, template_id: str) -> Optional[Image.Image]:
+        """Get template image by ID"""
+        template = self.stamp_manager.get_stamp(template_id)
+        if template:
+            return template.get_image()
+        return None
 
     # --- Export ---
 
@@ -149,8 +180,8 @@ class App:
         if self.handler is None or self.doc_path is None:
             messagebox.showwarning("提示", "请先打开文档")
             return
-        if not self.selected_stamps:
-            messagebox.showwarning("提示", "请至少选择一个章")
+        if self.instance_manager is None or not self.instance_manager.list_instances():
+            messagebox.showwarning("提示", "请先添加印章到文档")
             return
         if not self.selected_pages:
             messagebox.showwarning("提示", "请至少选择一页进行盖章")
@@ -159,7 +190,6 @@ class App:
         filter_name, filter_pattern = HandlerRegistry.get_output_filter(self.handler)
         default_ext = self.handler.default_output_extension()
 
-        import os
         original_name = os.path.splitext(os.path.basename(self.doc_path))[0]
         default_filename = f"{original_name}-已盖章{default_ext}"
 
@@ -173,47 +203,70 @@ class App:
             return
 
         try:
-            self._export_with_multiple_stamps(out_path)
+            self._export_with_instances(out_path)
             self.window.set_status(f"已导出: {out_path}")
             messagebox.showinfo("导出成功", f"已保存到:\n{out_path}")
         except Exception as e:
             messagebox.showerror("导出失败", str(e))
 
-    def _export_with_multiple_stamps(self, output_path: str):
-        """导出时叠加多个章"""
-        first_stamp = self.selected_stamps[0]
+    def _export_with_instances(self, output_path: str):
+        """Export with all instances applied per-page.
 
-        self.handler.export_with_stamp(
-            output_path=output_path,
-            stamp_img=first_stamp.stamp_img,
-            position_ratio=(first_stamp.pos_x, first_stamp.pos_y),
-            stamp_size_ratio=first_stamp.size_ratio,
-            selected_pages=self.selected_pages,
-        )
+        Strategy: export instances one-by-one. The first instance uses the
+        original handler; subsequent instances re-load the accumulating output
+        via a temp PDF, stacking stamps incrementally.
+        """
+        all_instances = self.instance_manager.list_instances()
+        page_instances: Dict[int, List[StampInstance]] = {}
+        for inst in all_instances:
+            if inst.page_index in self.selected_pages:
+                page_instances.setdefault(inst.page_index, []).append(inst)
 
-        if len(self.selected_stamps) > 1:
-            from processing.handlers.pdf_handler import PDFHandler
-            temp_handler = PDFHandler()
-            temp_handler.load(output_path)
+        if not page_instances:
+            return
 
-            for stamp_sel in self.selected_stamps[1:]:
-                temp_path = output_path + ".tmp"
-                temp_handler.export_with_stamp(
-                    output_path=temp_path,
-                    stamp_img=stamp_sel.stamp_img,
-                    position_ratio=(stamp_sel.pos_x, stamp_sel.pos_y),
-                    stamp_size_ratio=stamp_sel.size_ratio,
-                    selected_pages=self.selected_pages,
-                )
-                temp_handler.close()
+        # Flatten all instances into a single ordered list
+        ordered = []
+        for page_idx in sorted(page_instances.keys()):
+            ordered.extend(page_instances[page_idx])
 
-                import shutil
-                shutil.move(temp_path, output_path)
+        current_path = output_path
+        is_first = True
 
-                temp_handler = PDFHandler()
-                temp_handler.load(output_path)
+        for instance in ordered:
+            template = self.stamp_manager.get_stamp(instance.template_id)
+            if template is None:
+                continue
 
-            temp_handler.close()
+            stamp_img = template.get_image()
+
+            if instance.opacity < 1.0:
+                stamp_img = apply_opacity(stamp_img, instance.opacity)
+            if instance.rotation != 0:
+                stamp_img = apply_rotation(stamp_img, instance.rotation)
+
+            if is_first:
+                handler = self.handler
+                target = current_path
+                is_first = False
+            else:
+                handler = PDFHandler()
+                handler.load(current_path)
+                target = current_path + ".tmp"
+
+            handler.export_with_stamp(
+                output_path=target,
+                stamp_img=stamp_img,
+                position_ratio=(instance.pos_x, instance.pos_y),
+                stamp_size_ratio=instance.size_ratio,
+                selected_pages={instance.page_index},
+            )
+
+            if handler != self.handler:
+                handler.close()
+
+            if target != current_path:
+                shutil.move(target, current_path)
 
     # --- Internal ---
 
@@ -222,4 +275,13 @@ class App:
             return
         idx = min(self.current_preview_page, len(self.pages) - 1)
         page_img = self.pages[idx]
-        self.window.preview.update_preview(page_img, self.selected_stamps)
+
+        instances = self.get_page_stamp_data(idx)
+        template_images = {}
+        for inst in instances:
+            if inst.template_id not in template_images:
+                img = self.get_template_image(inst.template_id)
+                if img:
+                    template_images[inst.template_id] = img
+
+        self.window.preview.update_preview(page_img, instances, template_images)

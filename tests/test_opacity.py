@@ -3,8 +3,9 @@ import unittest
 from PIL import Image
 import numpy as np
 
-from processing.stamp import load_stamp, scale_stamp
+from processing.stamp import load_stamp, scale_stamp, apply_opacity
 from processing.stamp_manager import StampData, StampManager
+from processing.stamp_instance import StampInstance
 import io
 import base64
 
@@ -17,18 +18,12 @@ class TestOpacityEffect(unittest.TestCase):
         img = Image.new("RGBA", (200, 200), color=(255, 0, 0, 255))
         return img
 
-    def _create_stamp_data(self, opacity=1.0):
-        """创建带透明度的 StampData"""
-        img = self._create_test_stamp_image()
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        image_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        return StampData(
-            id="test1",
-            name="测试章",
-            image_base64=image_base64,
-            created_at="2024-01-01T00:00:00",
+    def _create_stamp_instance(self, opacity=1.0):
+        """创建带透明度的 StampInstance"""
+        return StampInstance(
+            instance_id="test1",
+            template_id="template1",
+            page_index=0,
             size_ratio=0.2,
             pos_x=0.7,
             pos_y=0.7,
@@ -38,67 +33,55 @@ class TestOpacityEffect(unittest.TestCase):
     # @dod opacity-default-100 v1.0
     def test_default_opacity_is_100(self):
         """默认透明度为 100%"""
-        stamp = self._create_stamp_data(opacity=1.0)
-        self.assertEqual(stamp.opacity, 1.0)
+        instance = self._create_stamp_instance(opacity=1.0)
+        self.assertEqual(instance.opacity, 1.0)
 
-    def test_stamp_data_has_opacity_field(self):
-        """StampData 包含 opacity 字段"""
-        stamp = self._create_stamp_data(opacity=0.5)
-        self.assertTrue(hasattr(stamp, 'opacity'))
-        self.assertEqual(stamp.opacity, 0.5)
+    def test_stamp_instance_has_opacity_field(self):
+        """StampInstance 包含 opacity 字段"""
+        instance = self._create_stamp_instance(opacity=0.5)
+        self.assertTrue(hasattr(instance, 'opacity'))
+        self.assertEqual(instance.opacity, 0.5)
 
     # @dod opacity-zero-fully-transparent v1.0
     def test_opacity_zero_fully_transparent(self):
         """透明度 0% 时印章完全透明"""
-        stamp = self._create_stamp_data(opacity=0.0)
-        self.assertEqual(stamp.opacity, 0.0)
+        instance = self._create_stamp_instance(opacity=0.0)
+        self.assertEqual(instance.opacity, 0.0)
 
-        img = stamp.get_image()
+        img = self._create_test_stamp_image()
         # 应用透明度
-        alpha = img.getchannel('A')
-        alpha = alpha.point(lambda p: int(p * stamp.opacity))
-        img.putalpha(alpha)
+        result = apply_opacity(img, instance.opacity)
 
         # 检查所有像素 alpha 是否为 0
-        arr = np.array(img)
+        arr = np.array(result)
         self.assertTrue(np.all(arr[:, :, 3] == 0))
 
     # @dod opacity-slider-preview v1.0
     def test_opacity_50_percent(self):
         """透明度 50% 时 alpha 通道减半"""
-        stamp = self._create_stamp_data(opacity=0.5)
-        img = stamp.get_image()
+        instance = self._create_stamp_instance(opacity=0.5)
+        img = self._create_test_stamp_image()
 
         # 应用透明度
-        alpha = img.getchannel('A')
-        alpha = alpha.point(lambda p: int(p * stamp.opacity))
-        img.putalpha(alpha)
+        result = apply_opacity(img, instance.opacity)
 
         # 检查 alpha 值（原图红色区域 alpha=255，应用 50% 后应为 127 或 128）
-        arr = np.array(img)
+        arr = np.array(result)
         center_pixel = arr[100, 100]
         self.assertEqual(center_pixel[3], 127)  # 255 * 0.5 = 127.5 -> 127
 
     # @dod opacity-persist v1.0
     def test_opacity_persistence(self):
-        """透明度设置持久化保存"""
-        import tempfile
-        import os
+        """透明度设置在内存中保存"""
+        from processing.stamp_instance import StampInstanceManager
+        manager = StampInstanceManager()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_file = os.path.join(tmpdir, "stamps.json")
-            manager = StampManager(config_dir=tmpdir)
+        instance = manager.add_instance("template1", 0)
+        manager.update_instance(instance.instance_id, opacity=0.5)
 
-            # 添加带透明度的章
-            img = self._create_test_stamp_image()
-            stamp = manager.add_stamp("测试章", img, opacity=0.5)
-            self.assertEqual(stamp.opacity, 0.5)
-
-            # 创建新的管理器实例（重新加载）
-            manager2 = StampManager(config_dir=tmpdir)
-            stamps = manager2.list_stamps()
-            self.assertEqual(len(stamps), 1)
-            self.assertEqual(stamps[0].opacity, 0.5)
+        instances = manager.get_page_instances(0)
+        self.assertEqual(len(instances), 1)
+        self.assertEqual(instances[0].opacity, 0.5)
 
     # @dod export-pdf-opacity v1.0 / export-image-opacity v1.0 / export-excel-opacity v1.0
     def test_apply_opacity_to_image(self):
@@ -107,40 +90,34 @@ class TestOpacityEffect(unittest.TestCase):
         opacity = 0.5
 
         # 应用透明度
-        alpha = img.getchannel('A')
-        alpha = alpha.point(lambda p: int(p * opacity))
-        img.putalpha(alpha)
+        result = apply_opacity(img, opacity)
 
         # 验证 alpha 通道
-        arr = np.array(img)
+        arr = np.array(result)
         self.assertEqual(arr[100, 100, 3], 127)
 
 
-class TestStampManagerOpacity(unittest.TestCase):
-    """StampManager 透明度相关测试"""
+class TestStampInstanceManagerOpacity(unittest.TestCase):
+    """StampInstanceManager 透明度相关测试"""
 
-    def test_add_stamp_with_opacity(self):
-        """添加章时指定透明度"""
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manager = StampManager(config_dir=tmpdir)
-            img = Image.new("RGBA", (100, 100), color=(255, 0, 0, 255))
-            stamp = manager.add_stamp("测试章", img, opacity=0.75)
-            self.assertEqual(stamp.opacity, 0.75)
+    def test_add_instance_with_default_opacity(self):
+        """添加实例时默认透明度为 100%"""
+        from processing.stamp_instance import StampInstanceManager
+        manager = StampInstanceManager()
+        instance = manager.add_instance("template1", 0)
 
-    def test_update_stamp_opacity(self):
-        """更新章的透明度"""
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmpdir:
-            manager = StampManager(config_dir=tmpdir)
-            img = Image.new("RGBA", (100, 100), color=(255, 0, 0, 255))
-            stamp = manager.add_stamp("测试章", img, opacity=1.0)
+        self.assertEqual(instance.opacity, 1.0)
 
-            # 更新透明度
-            manager.update_stamp(stamp.id, opacity=0.3)
+    def test_update_instance_opacity(self):
+        """更新实例的透明度"""
+        from processing.stamp_instance import StampInstanceManager
+        manager = StampInstanceManager()
+        instance = manager.add_instance("template1", 0)
 
-            updated = manager.get_stamp(stamp.id)
-            self.assertEqual(updated.opacity, 0.3)
+        manager.update_instance(instance.instance_id, opacity=0.3)
+
+        updated = manager.get_page_instances(0)[0]
+        self.assertEqual(updated.opacity, 0.3)
 
 
 if __name__ == "__main__":

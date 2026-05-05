@@ -4,7 +4,7 @@ from typing import Set, Tuple, Optional
 import io
 
 from processing.base import DocumentHandler
-from processing.stamp import apply_opacity
+from processing.stamp import scale_stamp
 
 # 尝试导入 openpyxl，如果失败则提供友好错误信息
 try:
@@ -217,12 +217,9 @@ class ExcelHandler(DocumentHandler):
             stamp_width = int(base_width * stamp_size_ratio)
             stamp_height = int(stamp_width * stamp_img.height / stamp_img.width)
 
-            # 应用透明度
-            scaled_stamp = apply_opacity(stamp_img, getattr(stamp_img, '_opacity', 1.0))
-
-            # 缩放印章图像
+            # 缩放印章图像（透明度/旋转已由调用方预处理）
             resample = getattr(Image, "LANCZOS", None) or getattr(Image, "ANTIALIAS")
-            scaled_stamp = scaled_stamp.resize((stamp_width, stamp_height), resample)
+            scaled_stamp = stamp_img.resize((stamp_width, stamp_height), resample)
 
             # 将印章保存为字节流
             stamp_bytes = io.BytesIO()

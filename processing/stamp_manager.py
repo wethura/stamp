@@ -11,15 +11,11 @@ import io
 
 @dataclass
 class StampData:
-    """章数据模型"""
+    """章模板数据模型 - 只包含元数据，不包含页级配置"""
     id: str
     name: str
     image_base64: str
     created_at: str
-    size_ratio: float = 0.2  # 默认章大小比例
-    pos_x: float = 0.7  # 位置 X 比例
-    pos_y: float = 0.7  # 位置 Y 比例
-    opacity: float = 1.0  # 透明度 0.0~1.0，默认完全不透明
 
     def get_image(self) -> Image.Image:
         """解码 base64 获取 PIL Image"""
@@ -47,7 +43,11 @@ class StampManager:
         try:
             with open(self.data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                self._stamps = [StampData(**item) for item in data]
+                valid_fields = {'id', 'name', 'image_base64', 'created_at'}
+                self._stamps = []
+                for item in data:
+                    filtered = {k: v for k, v in item.items() if k in valid_fields}
+                    self._stamps.append(StampData(**filtered))
         except (json.JSONDecodeError, KeyError):
             self._stamps = []
 
@@ -61,14 +61,10 @@ class StampManager:
         """获取所有章"""
         return self._stamps.copy()
 
-    def add_stamp(self, name: str, img: Image.Image, size_ratio: float = 0.2,
-                  pos_x: float = 0.7, pos_y: float = 0.7,
-                  opacity: float = 1.0) -> StampData:
-        """添加新章"""
-        # 生成唯一 ID
+    def add_stamp(self, name: str, img: Image.Image) -> StampData:
+        """添加新章模板"""
         stamp_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
 
-        # 转换图片为 base64
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         image_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
@@ -77,34 +73,18 @@ class StampManager:
             id=stamp_id,
             name=name,
             image_base64=image_base64,
-            created_at=datetime.now().isoformat(),
-            size_ratio=size_ratio,
-            pos_x=pos_x,
-            pos_y=pos_y,
-            opacity=opacity
+            created_at=datetime.now().isoformat()
         )
         self._stamps.append(stamp)
         self._save()
         return stamp
 
-    def update_stamp(self, stamp_id: str, name: Optional[str] = None,
-                     size_ratio: Optional[float] = None,
-                     pos_x: Optional[float] = None,
-                     pos_y: Optional[float] = None,
-                     opacity: Optional[float] = None) -> Optional[StampData]:
-        """更新章信息"""
+    def update_stamp(self, stamp_id: str, name: Optional[str] = None) -> Optional[StampData]:
+        """更新章模板信息"""
         for stamp in self._stamps:
             if stamp.id == stamp_id:
                 if name is not None:
                     stamp.name = name
-                if size_ratio is not None:
-                    stamp.size_ratio = size_ratio
-                if pos_x is not None:
-                    stamp.pos_x = pos_x
-                if pos_y is not None:
-                    stamp.pos_y = pos_y
-                if opacity is not None:
-                    stamp.opacity = opacity
                 self._save()
                 return stamp
         return None

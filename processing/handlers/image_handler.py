@@ -4,7 +4,7 @@ from typing import Set, Tuple, Optional
 import fitz
 
 from processing.base import DocumentHandler
-from processing.stamp import scale_stamp, to_png_bytes, apply_opacity
+from processing.stamp import scale_stamp, to_png_bytes
 
 
 # 支持的图片扩展名
@@ -89,7 +89,6 @@ class ImageHandler(DocumentHandler):
         # 如果选中了第 0 页（唯一的一页），添加印章
         if 0 in selected_pages:
             scaled = scale_stamp(stamp_img, img_w, stamp_size_ratio)
-            scaled = apply_opacity(scaled, getattr(stamp_img, '_opacity', 1.0))
             sw, sh = scaled.size
             x = x_ratio * img_w
             y = y_ratio * img_h

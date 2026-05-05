@@ -6,10 +6,12 @@
 - 支持拖入文档打开
 - 印章透明度可调
 
-### P1：印章增强（待规划）
-- [ ] 旋转支持
-- [ ] 纵+横页面公章支持
-- [ ] 单独每页设置章
+### 🚧 P1：印章增强（当前）
+📋 [功能规格](.project/plans/stamp-enhancement/spec.md) | [测试规格](.project/plans/stamp-enhancement/dod.md) | [技术设计](.project/plans/stamp-enhancement/design.md)
+- [x] 数据模型重构（模板+实例分离）
+- [x] 每页独立配置
+- [x] 旋转支持
+- [x] 纵横页面适配
 
 ## 进行中
 
