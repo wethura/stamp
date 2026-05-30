@@ -84,6 +84,8 @@ class App:
     def _load_document(self, path: str, handler):
         try:
             if self.handler is not None:
+                if self.instance_manager is not None:
+                    self.instance_manager.save()
                 self.handler.close()
 
             handler.load(path)
@@ -94,7 +96,8 @@ class App:
             for i in range(handler.page_count()):
                 self.pages.append(handler.render_page(i))
 
-            self.instance_manager = StampInstanceManager()
+            self.instance_manager = StampInstanceManager(path)
+            self.instance_manager.load()
             self.current_preview_page = 0
             self.selected_pages = set(range(len(self.pages)))
             self._selected_instance_id = None
@@ -116,6 +119,7 @@ class App:
         instance = self.instance_manager.add_instance(template_id, self.current_preview_page)
         self._selected_instance_id = instance.instance_id
         self.window.controls.set_editing_instance(instance.instance_id)
+        self.instance_manager.save()
         self._refresh_preview()
 
     def delete_instance(self, instance_id: str):
@@ -127,6 +131,7 @@ class App:
         if self._selected_instance_id == instance_id:
             self._selected_instance_id = None
             self.window.controls.set_editing_instance(None)
+        self.instance_manager.save()
         self._refresh_preview()
 
     def on_instance_position_changed(self, instance_id: str, pos_x: float, pos_y: float):
@@ -134,6 +139,7 @@ class App:
         if self.instance_manager is None:
             return
         self.instance_manager.update_instance(instance_id, pos_x=pos_x, pos_y=pos_y)
+        self.instance_manager.save()
         self._refresh_preview()
 
     def on_instance_selected(self, instance_id: Optional[str]):
@@ -146,6 +152,7 @@ class App:
         if self.instance_manager is None:
             return
         self.instance_manager.update_instance(instance_id, **kwargs)
+        self.instance_manager.save()
         self._refresh_preview()
 
     # --- Page Navigation ---

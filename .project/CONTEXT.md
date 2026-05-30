@@ -1,23 +1,14 @@
-## 当前 Sprint：体验优化
-目标：提升 Stamp Tool 的日常使用体验
+## 当前 Sprint：体验优化-印章增强（完善中）
+目标：提升 Stamp Tool 的日常使用体验 + 完善印章增强未实现功能
 
 关键点：
-- 删除章按钮更明显
-- 支持拖入文档打开
-- 印章透明度可调
+- 实例配置持久化（关闭应用后配置不丢失）
+- 模板拖拽到预览区创建实例
 
-### ✅ P1：体验优化（已完成）
-📋 [功能规格](.project/plans/experience-optimization/spec.md) | [测试规格](.project/plans/experience-optimization/dod.md)
-- [x] 删除按钮显式化
-- [x] 拖入文档打开
-- [x] 印章透明度可调
-
-### ✅ P2：印章增强（已完成）
-📋 [功能规格](.project/done/sprints/体验优化-印章增强/plans/stamp-enhancement/spec.md) | [测试规格](.project/done/sprints/体验优化-印章增强/plans/stamp-enhancement/dod.md) | [技术设计](.project/done/sprints/体验优化-印章增强/plans/stamp-enhancement/design.md)
-- [x] 数据模型重构（模板+实例分离）
-- [x] 每页独立配置
-- [x] 旋转支持
-- [x] 纵横页面适配
+### 🚧 P3：印章增强完善（当前）
+📋 [功能规格](.project/plans/stamp-enhancement/spec.md) | [测试规格](.project/plans/stamp-enhancement/dod.md) | [技术设计](.project/plans/stamp-enhancement/design.md)
+- [x] 实例配置 JSON 持久化
+- [x] 模板拖拽到预览区创建实例
 
 ## 进行中
 

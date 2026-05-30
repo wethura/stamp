@@ -50,6 +50,9 @@ class MainWindow(tk.Tk):
         # Wire up instance property changes from controls to controller
         self.controls.on_instance_property_changed = self.controller.update_instance_property
 
+        # Allow controls to detect drag-drop onto preview area
+        self.controls._drop_target = self.preview.canvas
+
         self._status_var = tk.StringVar(value="就绪")
         status = tk.Label(self, textvariable=self._status_var,
                           bd=1, relief=tk.SUNKEN, anchor=tk.W)
@@ -118,6 +121,9 @@ class MainFrame(tk.Frame):
         self.controls.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.controls.on_instance_property_changed = self.controller.update_instance_property
+
+        # Allow controls to detect drag-drop onto preview area
+        self.controls._drop_target = self.preview.canvas
 
         self._status_var = tk.StringVar(value="就绪")
         status = tk.Label(self, textvariable=self._status_var,

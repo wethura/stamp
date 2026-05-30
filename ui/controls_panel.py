@@ -212,12 +212,83 @@ class ControlsPanel(tk.Frame):
         def on_double_click(e, sid=stamp.id):
             self._on_stamp_double_click(sid)
 
-        container.bind("<Double-Button-1>", on_double_click)
-        lbl_img.bind("<Double-Button-1>", on_double_click)
-        lbl_name.bind("<Double-Button-1>", on_double_click)
+        # Drag to create instance — press starts drag, release triggers create
+        def on_drag_start(e, sid=stamp.id, photo_img=photo):
+            self._start_stamp_drag(e, sid, photo_img)
+
+        for widget in (container, lbl_img, lbl_name):
+            widget.bind("<Double-Button-1>", on_double_click)
+            widget.bind("<ButtonPress-1>", on_drag_start)
 
     def _on_stamp_double_click(self, template_id: str):
         """Handle double-click on template - create instance"""
+        if self.on_create_instance:
+            self.on_create_instance(template_id)
+
+    def _start_stamp_drag(self, event, template_id: str, photo_img):
+        """开始拖拽模板 — 创建浮动缩略图跟随鼠标"""
+        self._drag_template_id = template_id
+        self._drag_window = tk.Toplevel(self)
+        self._drag_window.overrideredirect(True)
+        self._drag_window.attributes("-alpha", 0.7)
+
+        lbl = tk.Label(self._drag_window, image=photo_img)
+        lbl.pack()
+        self._drag_photo_ref = photo_img
+
+        self._drag_window.geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+
+        # 绑定全局拖拽事件到根窗口
+        root = self.winfo_toplevel()
+        self._drag_motion_binding = root.bind("<B1-Motion>", self._on_stamp_drag_motion)
+        self._drag_release_binding = root.bind("<ButtonRelease-1>", self._on_stamp_drag_release_global)
+
+    def _on_stamp_drag_motion(self, event):
+        """拖拽移动 — 浮动窗口跟随鼠标"""
+        if hasattr(self, '_drag_window') and self._drag_window.winfo_exists():
+            self._drag_window.geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+
+    def _on_stamp_drag_release_global(self, event):
+        """拖拽释放 — 检测是否在预览区，触发创建实例"""
+        # 清理全局绑定
+        root = self.winfo_toplevel()
+        if hasattr(self, '_drag_motion_binding'):
+            root.unbind("<B1-Motion>", self._drag_motion_binding)
+        if hasattr(self, '_drag_release_binding'):
+            root.unbind("<ButtonRelease-1>", self._drag_release_binding)
+
+        # 关闭浮动窗口
+        if hasattr(self, '_drag_window') and self._drag_window.winfo_exists():
+            self._drag_window.destroy()
+
+        # 检测释放位置是否在预览区
+        template_id = getattr(self, '_drag_template_id', None)
+        if template_id is None:
+            return
+
+        # 获取预览区 widget（由 MainWindow 设置）
+        target = getattr(self, '_drop_target', None)
+        if target is None:
+            return
+
+        target_widget = target if isinstance(target, tk.Widget) else None
+        if target_widget is None:
+            return
+
+        try:
+            target_x = target_widget.winfo_rootx()
+            target_y = target_widget.winfo_rooty()
+            target_w = target_widget.winfo_width()
+            target_h = target_widget.winfo_height()
+
+            if (target_x <= event.x_root <= target_x + target_w and
+                    target_y <= event.y_root <= target_y + target_h):
+                self._on_stamp_drag_release(template_id)
+        except tk.TclError:
+            pass
+
+    def _on_stamp_drag_release(self, template_id: str):
+        """拖拽释放回调 — 创建实例"""
         if self.on_create_instance:
             self.on_create_instance(template_id)
 

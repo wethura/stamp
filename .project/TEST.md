@@ -14,6 +14,12 @@ python -m unittest discover tests -v
 - 共享工具：tests/__init__.py
 - 数据策略：使用 tempfile 创建临时目录，测试后自动清理
 
+### 数据测试
+- 框架：unittest（标准库）
+- 测试文件位置：tests/test_instance_persistence.py
+- 共享工具：tempfile 创建临时目录，每个用例独立的 tmpdir
+- 数据策略：构造 StampInstance 直接赋值，验证序列化/反序列化往返
+
 ### GUI 测试
 - 框架：unittest + tkinter
 - 测试文件位置：tests/test_controls_panel.py 等
