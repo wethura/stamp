@@ -41,7 +41,6 @@ class MainWindow(tk.Tk):
 
         self.controls = ControlsPanel(
             main,
-            on_pages_changed=self.controller.on_pages_changed,
             on_preview_page_changed=self.controller.on_preview_page_change,
             on_create_instance=self.controller.create_instance_from_template,
             width=240
@@ -115,7 +114,6 @@ class MainFrame(tk.Frame):
 
         self.controls = ControlsPanel(
             main,
-            on_pages_changed=self.controller.on_pages_changed,
             on_preview_page_changed=self.controller.on_preview_page_change,
             on_create_instance=self.controller.create_instance_from_template,
             width=240

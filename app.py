@@ -23,7 +23,6 @@ class App:
         self.stamp_manager = StampManager()
         self.instance_manager: Optional[StampInstanceManager] = None
 
-        self.selected_pages = set()
         self.current_preview_page = 0
         self._selected_instance_id: Optional[str] = None
 
@@ -84,8 +83,6 @@ class App:
     def _load_document(self, path: str, handler):
         try:
             if self.handler is not None:
-                if self.instance_manager is not None:
-                    self.instance_manager.save()
                 self.handler.close()
 
             handler.load(path)
@@ -97,9 +94,7 @@ class App:
                 self.pages.append(handler.render_page(i))
 
             self.instance_manager = StampInstanceManager(path)
-            self.instance_manager.load()
             self.current_preview_page = 0
-            self.selected_pages = set(range(len(self.pages)))
             self._selected_instance_id = None
 
             self.window.controls.set_pages(len(self.pages))
@@ -119,7 +114,6 @@ class App:
         instance = self.instance_manager.add_instance(template_id, self.current_preview_page)
         self._selected_instance_id = instance.instance_id
         self.window.controls.set_editing_instance(instance.instance_id)
-        self.instance_manager.save()
         self._refresh_preview()
 
     def delete_instance(self, instance_id: str):
@@ -131,7 +125,6 @@ class App:
         if self._selected_instance_id == instance_id:
             self._selected_instance_id = None
             self.window.controls.set_editing_instance(None)
-        self.instance_manager.save()
         self._refresh_preview()
 
     def on_instance_position_changed(self, instance_id: str, pos_x: float, pos_y: float):
@@ -142,9 +135,8 @@ class App:
         self._refresh_preview()
 
     def on_instance_drag_end(self):
-        """Instance drag ended — persist position"""
-        if self.instance_manager is not None:
-            self.instance_manager.save()
+        """Instance drag ended"""
+        pass
 
     def on_instance_selected(self, instance_id: Optional[str]):
         """Instance selected in preview"""
@@ -156,13 +148,9 @@ class App:
         if self.instance_manager is None:
             return
         self.instance_manager.update_instance(instance_id, **kwargs)
-        self.instance_manager.save()
         self._refresh_preview()
 
     # --- Page Navigation ---
-
-    def on_pages_changed(self, selected: set):
-        self.selected_pages = selected
 
     def on_preview_page_change(self, idx: int):
         self.current_preview_page = idx
@@ -193,9 +181,6 @@ class App:
             return
         if self.instance_manager is None or not self.instance_manager.list_instances():
             messagebox.showwarning("提示", "请先添加印章到文档")
-            return
-        if not self.selected_pages:
-            messagebox.showwarning("提示", "请至少选择一页进行盖章")
             return
 
         filter_name, filter_pattern = HandlerRegistry.get_output_filter(self.handler)
@@ -230,8 +215,7 @@ class App:
         all_instances = self.instance_manager.list_instances()
         page_instances: Dict[int, List[StampInstance]] = {}
         for inst in all_instances:
-            if inst.page_index in self.selected_pages:
-                page_instances.setdefault(inst.page_index, []).append(inst)
+            page_instances.setdefault(inst.page_index, []).append(inst)
 
         if not page_instances:
             return

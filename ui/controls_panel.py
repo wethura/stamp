@@ -10,16 +10,13 @@ from processing.stamp_instance import StampInstance, StampInstanceManager
 
 class ControlsPanel(tk.Frame):
     def __init__(self, parent,
-                 on_pages_changed=None,
                  on_preview_page_changed=None,
                  on_create_instance=None,
                  **kwargs):
         super().__init__(parent, **kwargs)
-        self.on_pages_changed = on_pages_changed
         self.on_preview_page_changed = on_preview_page_changed
         self.on_create_instance = on_create_instance
 
-        self._page_vars = []
         self._page_count = 0
         self._current_preview = 0
 
@@ -127,22 +124,6 @@ class ControlsPanel(tk.Frame):
 
         self._next_btn = tk.Button(nav_frame, text=">", width=3, command=self._next_page)
         self._next_btn.pack(side=tk.LEFT)
-
-        # === Stamp Pages ===
-        pages_frame = tk.LabelFrame(self, text="盖章页码", padx=5, pady=5)
-        pages_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        scroll2 = tk.Scrollbar(pages_frame)
-        scroll2.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self._pages_canvas = tk.Canvas(pages_frame, yscrollcommand=scroll2.set)
-        self._pages_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll2.config(command=self._pages_canvas.yview)
-
-        self._pages_inner = tk.Frame(self._pages_canvas)
-        self._pages_canvas.create_window((0, 0), window=self._pages_inner, anchor=tk.NW)
-        self._pages_inner.bind("<Configure>",
-            lambda e: self._pages_canvas.configure(scrollregion=self._pages_canvas.bbox("all")))
 
     # === Template Library Methods ===
 
@@ -376,27 +357,9 @@ class ControlsPanel(tk.Frame):
     # === Page Navigation Methods ===
 
     def set_pages(self, count: int):
-        for w in self._pages_inner.winfo_children():
-            w.destroy()
-        self._page_vars = []
         self._page_count = count
         self._current_preview = 0
-
-        for i in range(count):
-            var = tk.BooleanVar(value=True)
-            cb = tk.Checkbutton(self._pages_inner, text=f"第 {i+1} 页",
-                                variable=var, command=self._on_pages_changed)
-            cb.pack(anchor=tk.W)
-            self._page_vars.append(var)
-
         self._update_nav_label()
-
-    def get_selected_pages(self) -> set:
-        return {i for i, v in enumerate(self._page_vars) if v.get()}
-
-    def _on_pages_changed(self):
-        if self.on_pages_changed:
-            self.on_pages_changed(self.get_selected_pages())
 
     def _prev_page(self):
         if self._page_count > 0:
