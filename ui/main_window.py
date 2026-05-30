@@ -34,6 +34,7 @@ class MainWindow(tk.Tk):
             on_stamp_position_changed=self.controller.on_instance_position_changed,
             on_delete_instance=self.controller.delete_instance,
             on_instance_selected=self.controller.on_instance_selected,
+            on_drag_end=self.controller.on_instance_drag_end,
             bg="#2b2b2b"
         )
         self.preview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -107,6 +108,7 @@ class MainFrame(tk.Frame):
             on_stamp_position_changed=self.controller.on_instance_position_changed,
             on_delete_instance=self.controller.delete_instance,
             on_instance_selected=self.controller.on_instance_selected,
+            on_drag_end=self.controller.on_instance_drag_end,
             bg="#2b2b2b"
         )
         self.preview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)

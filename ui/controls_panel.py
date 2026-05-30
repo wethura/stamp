@@ -266,20 +266,15 @@ class ControlsPanel(tk.Frame):
         if template_id is None:
             return
 
-        # 获取预览区 widget（由 MainWindow 设置）
         target = getattr(self, '_drop_target', None)
         if target is None:
             return
 
-        target_widget = target if isinstance(target, tk.Widget) else None
-        if target_widget is None:
-            return
-
         try:
-            target_x = target_widget.winfo_rootx()
-            target_y = target_widget.winfo_rooty()
-            target_w = target_widget.winfo_width()
-            target_h = target_widget.winfo_height()
+            target_x = target.winfo_rootx()
+            target_y = target.winfo_rooty()
+            target_w = target.winfo_width()
+            target_h = target.winfo_height()
 
             if (target_x <= event.x_root <= target_x + target_w and
                     target_y <= event.y_root <= target_y + target_h):

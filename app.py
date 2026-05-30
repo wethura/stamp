@@ -139,8 +139,12 @@ class App:
         if self.instance_manager is None:
             return
         self.instance_manager.update_instance(instance_id, pos_x=pos_x, pos_y=pos_y)
-        self.instance_manager.save()
         self._refresh_preview()
+
+    def on_instance_drag_end(self):
+        """Instance drag ended — persist position"""
+        if self.instance_manager is not None:
+            self.instance_manager.save()
 
     def on_instance_selected(self, instance_id: Optional[str]):
         """Instance selected in preview"""

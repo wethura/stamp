@@ -51,11 +51,13 @@ class PreviewCanvas(tk.Frame):
                  on_stamp_position_changed=None,
                  on_delete_instance=None,
                  on_instance_selected=None,
+                 on_drag_end=None,
                  **kwargs):
         super().__init__(parent, **kwargs)
         self.on_stamp_position_changed = on_stamp_position_changed
         self.on_delete_instance = on_delete_instance
         self.on_instance_selected = on_instance_selected
+        self.on_drag_end = on_drag_end
 
         self.canvas = tk.Canvas(self, bg="#2b2b2b", cursor="crosshair")
         self.canvas.pack(fill=tk.BOTH, expand=True)
@@ -242,9 +244,12 @@ class PreviewCanvas(tk.Frame):
             self.on_stamp_position_changed(self._dragging_instance_id, new_x, new_y)
 
     def _on_release(self, event):
+        was_dragging = self._dragging_instance_id is not None
         self._drag_start = None
         self._dragging_instance_id = None
         self.canvas.config(cursor="crosshair")
+        if was_dragging and self.on_drag_end:
+            self.on_drag_end()
 
     def _on_backspace(self, event):
         self._delete_selected()
