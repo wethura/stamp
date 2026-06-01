@@ -1,15 +1,19 @@
-import tkinter as tk
+"""Application entry point — CustomTkinter."""
+
+import customtkinter as ctk
 
 
 def main():
-    # 创建根窗口（用于启动画面）
-    root = tk.Tk()
+    from ui.theme import init_theme
+    init_theme()
 
-    # 显示启动画面
-    from ui.splash_screen import SplashFrame
-    splash = SplashFrame(root)
+    root = ctk.CTk()
+    root.withdraw()
 
-    # 加载阶段 1: 导入模块
+    # ── Splash screen ─────────────────────────────────────────────
+    from ui.splash_screen import SplashScreen
+    splash = SplashScreen(root)
+
     splash.update_progress(20, "正在加载文档处理器...")
     from processing import HandlerRegistry
 
@@ -18,39 +22,29 @@ def main():
 
     splash.update_progress(60, "正在创建应用...")
 
-    # 加载阶段 2: 创建应用
+    # ── Create App controller ─────────────────────────────────────
     from app import App
-    app = App.__new__(App)
+    app_controller = App.__new__(App)
+    app_controller.handler = None
+    app_controller.doc_path = None
+    app_controller.pages = []
+    app_controller.instance_manager = None
+    app_controller.current_preview_page = 0
+    app_controller._selected_instance_id = None
+    app_controller.stamp_manager = StampManager()
 
     splash.update_progress(80, "正在初始化章管理器...")
-    app.handler = None
-    app.doc_path = None
-    app.pages = []
-    app.instance_manager = None
-    app.selected_pages = set()
-    app.current_preview_page = 0
-    app._selected_instance_id = None
-    app.stamp_manager = StampManager()
-
     splash.update_progress(100, "加载完成!")
-    root.update()
-    root.after(200)
 
-    # 关闭启动画面（恢复窗口属性并销毁 Frame）
+    # ── Close splash, show main window ────────────────────────────
     splash.close()
 
-    # 创建主窗口组件（使用同一个根窗口）
-    from ui.main_window import MainFrame
-    main_frame = MainFrame(root, app)
-    app.window = main_frame
+    from ui.main_window import MainWindow
+    window = MainWindow(root, app_controller)
+    app_controller.window = window
+    window.controls.set_stamp_manager(app_controller.stamp_manager)
 
-    # 设置章管理器
-    main_frame.controls.set_stamp_manager(app.stamp_manager)
-
-    # 显示主窗口
     root.deiconify()
-
-    # 运行主应用
     root.mainloop()
 
 

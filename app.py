@@ -1,3 +1,5 @@
+"""Application controller — bridges UI and processing layers."""
+
 from tkinter import filedialog, messagebox
 from PIL import Image
 from typing import Optional, List, Dict
@@ -11,7 +13,6 @@ from processing.stamp_manager import StampManager
 from processing.stamp_instance import StampInstance, StampInstanceManager
 from processing.stamp import apply_opacity, apply_rotation
 from processing.handlers.pdf_handler import PDFHandler
-from ui.main_window import MainWindow
 
 
 class App:
@@ -26,11 +27,7 @@ class App:
         self.current_preview_page = 0
         self._selected_instance_id: Optional[str] = None
 
-        self.window = MainWindow(self)
-        self.window.controls.set_stamp_manager(self.stamp_manager)
-
-    def run(self):
-        self.window.mainloop()
+        self.window = None
 
     # --- Document ---
 

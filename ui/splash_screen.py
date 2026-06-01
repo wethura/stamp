@@ -1,101 +1,84 @@
-import tkinter as tk
+"""Splash screen — CTkToplevel with 墨韵 theme."""
+
+import customtkinter as ctk
+
+from ui.theme import Colors, Fonts
 
 
-class SplashFrame(tk.Frame):
-    """启动画面 Frame - 显示在根窗口上"""
+class SplashScreen(ctk.CTkToplevel):
+    """Startup splash screen with title, subtitle, and progress bar."""
 
     def __init__(self, parent):
         super().__init__(parent)
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.resizable(False, False)
 
-        # 设置窗口属性
-        parent.title("盖章工具")
-        parent.geometry("420x220")
-        parent.resizable(False, False)
-        parent.overrideredirect(True)  # 无边框
-        parent.attributes('-topmost', True)
-
-        # 居中显示
-        parent.update_idletasks()
-        width = parent.winfo_width()
-        height = parent.winfo_height()
-        x = (parent.winfo_screenwidth() // 2) - (width // 2)
-        y = (parent.winfo_screenheight() // 2) - (height // 2)
-        parent.geometry(f'{width}x{height}+{x}+{y}')
+        self.title("盖章工具")
+        self.geometry("420x220")
+        self._center_on_screen()
 
         self._build_ui()
-        self.pack(fill=tk.BOTH, expand=True)
-        parent.update()
+        self.update()
+
+    def _center_on_screen(self):
+        self.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        x = (sw - 420) // 2
+        y = (sh - 220) // 2
+        self.geometry(f"420x220+{x}+{y}")
 
     def _build_ui(self):
-        # 背景
-        self.configure(bg='#3b82f6')
+        container = ctk.CTkFrame(self, fg_color=Colors.BG_DARK, corner_radius=12)
+        container.pack(fill="both", expand=True, padx=2, pady=2)
 
-        # 标题
-        title_label = tk.Label(
-            self,
+        # Title
+        title = ctk.CTkLabel(
+            container,
             text="盖章工具",
-            font=('PingFang SC', 32, 'bold'),
-            fg='white',
-            bg='#3b82f6'
+            font=(Fonts.FAMILY, Fonts.SPLASH_TITLE_SIZE, "bold"),
+            text_color=Colors.TEXT_ON_DARK,
         )
-        title_label.pack(pady=(40, 10))
+        title.pack(pady=(40, 6))
 
-        # 副标题
-        subtitle_label = tk.Label(
-            self,
-            text="Stamp Tool",
-            font=('Helvetica', 12),
-            fg='#93c5fd',
-            bg='#3b82f6'
+        # Subtitle
+        subtitle = ctk.CTkLabel(
+            container,
+            text="S t a m p   T o o l",
+            font=("Helvetica", Fonts.SPLASH_SUBTITLE_SIZE),
+            text_color=Colors.GOLD,
         )
-        subtitle_label.pack(pady=(0, 25))
+        subtitle.pack(pady=(0, 25))
 
-        # 加载文字
-        self.loading_label = tk.Label(
-            self,
+        # Loading message
+        self._loading_label = ctk.CTkLabel(
+            container,
             text="正在初始化...",
-            font=('PingFang SC', 11),
-            fg='#dbeafe',
-            bg='#3b82f6'
+            font=(Fonts.FAMILY, Fonts.SPLASH_LOADING_SIZE),
+            text_color=Colors.TEXT_SECONDARY,
         )
-        self.loading_label.pack(pady=(0, 12))
+        self._loading_label.pack(pady=(0, 12))
 
-        # 进度条容器
-        progress_frame = tk.Frame(self, bg='#3b82f6')
-        progress_frame.pack(fill=tk.X, padx=50)
-
-        # 进度条（使用 Canvas）
-        self.progress_canvas = tk.Canvas(
-            progress_frame,
-            height=4,
-            bg='#2563eb',
-            highlightthickness=0
+        # Progress bar
+        self._progress = ctk.CTkProgressBar(
+            container,
+            width=320,
+            height=6,
+            fg_color=(Colors.GOLD, Colors.GOLD),
+            progress_color=Colors.PRIMARY,
+            corner_radius=3,
         )
-        self.progress_canvas.pack(fill=tk.X)
-        self.progress_canvas.create_rectangle(
-            0, 0, 0, 4,
-            fill='white',
-            outline='',
-            tags='progress'
-        )
+        self._progress.pack(padx=50)
+        self._progress.set(0)
 
     def update_progress(self, percent: int, message: str = None):
-        """更新进度"""
+        """Update progress bar and optional loading message."""
         if message:
-            self.loading_label.config(text=message)
-
-        self.update_idletasks()
-        canvas_width = self.progress_canvas.winfo_width()
-        if canvas_width > 1:
-            progress_width = int(canvas_width * percent / 100)
-            self.progress_canvas.coords('progress', 0, 0, progress_width, 4)
+            self._loading_label.configure(text=message)
+        self._progress.set(percent / 100.0)
         self.update()
 
     def close(self):
-        """关闭启动画面"""
-        # 恢复父窗口属性
-        parent = self.master
-        parent.overrideredirect(False)
-        parent.attributes('-topmost', False)
-        parent.resizable(True, True)
+        """Close the splash screen."""
         self.destroy()
