@@ -1,35 +1,48 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
-from PIL import Image, ImageTk
-from typing import Optional, List, Callable
+"""Right-side controls panel — stamp library, instance editing, page navigation."""
+
+from tkinter import filedialog, messagebox, simpledialog
+from typing import Optional
+
+import customtkinter as ctk
 
 from processing.stamp import load_stamp
 from processing.stamp_manager import StampData
-from processing.stamp_instance import StampInstance, StampInstanceManager
+from processing.stamp_instance import StampInstanceManager
+from ui.stamp_card import StampCard
+from ui.theme import Colors, Fonts, Spacing, PANEL_WIDTH
 
 
-class ControlsPanel(tk.Frame):
+class ControlsPanel(ctk.CTkScrollableFrame):
+    """Right-side panel with stamp template library, instance editing sliders, and page navigation."""
+
+    on_instance_property_changed = None
+
     def __init__(self, parent,
                  on_preview_page_changed=None,
-                 on_create_instance=None,
-                 **kwargs):
-        super().__init__(parent, **kwargs)
+                 on_create_instance=None):
+        super().__init__(
+            parent,
+            width=PANEL_WIDTH,
+            fg_color=Colors.BG_DARK,
+            scrollbar_fg_color=Colors.BG_DARK,
+            scrollbar_button_color=Colors.BG_CARD,
+            scrollbar_button_hover_color="#3A3D4E",
+        )
+
         self.on_preview_page_changed = on_preview_page_changed
         self.on_create_instance = on_create_instance
 
         self._page_count = 0
         self._current_preview = 0
-
-        # Template library
-        self._stamps: List[StampData] = []
-        self._stamp_previews: dict = {}
         self._stamp_manager = None
-
-        # Instance editing
         self._instance_manager: Optional[StampInstanceManager] = None
         self._editing_instance_id: Optional[str] = None
 
         self._build_ui()
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  Public API
+    # ═══════════════════════════════════════════════════════════════════
 
     def set_stamp_manager(self, manager):
         self._stamp_manager = manager
@@ -44,88 +57,163 @@ class ControlsPanel(tk.Frame):
         self._editing_instance_id = instance_id
         self._update_edit_controls()
 
+    def set_pages(self, count: int):
+        self._page_count = count
+        self._current_preview = 0
+        self._update_nav_label()
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  UI Construction
+    # ═══════════════════════════════════════════════════════════════════
+
     def _build_ui(self):
-        # === Template Library ===
-        stamp_frame = tk.LabelFrame(self, text="章模板库（双击添加到当前页）", padx=5, pady=5)
-        stamp_frame.pack(fill=tk.X, padx=5, pady=5)
+        self.grid_columnconfigure(0, weight=1)
 
-        btn_frame = tk.Frame(stamp_frame)
-        btn_frame.pack(fill=tk.X, pady=2)
-        tk.Button(btn_frame, text="导入新章", command=self._import_stamp).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=1)
+        row = 0
 
-        list_frame = tk.Frame(stamp_frame)
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        # ── Template Library Section ─────────────────────────────────
+        self._build_section_heading("章模板库", row)
+        row += 1
 
-        scroll = tk.Scrollbar(list_frame)
-        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        import_btn = ctk.CTkButton(
+            self,
+            text="＋ 导入新章",
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_DARK,
+            text_color=Colors.PRIMARY_PALE,
+            font=(Fonts.FAMILY, Fonts.BODY_SIZE, "bold"),
+            height=32,
+            corner_radius=6,
+            command=self._import_stamp,
+        )
+        import_btn.grid(row=row, column=0, padx=8, pady=(4, 6), sticky="ew")
+        row += 1
 
-        self._stamp_canvas = tk.Canvas(list_frame, height=170, yscrollcommand=scroll.set)
-        self._stamp_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll.config(command=self._stamp_canvas.yview)
+        # Scrollable stamp card grid
+        self._scroll_frame = ctk.CTkScrollableFrame(
+            self, fg_color="transparent", height=220,
+        )
+        self._scroll_frame.grid(row=row, column=0, padx=6, pady=(4, 6), sticky="nsew")
+        self._scroll_frame.grid_columnconfigure((0, 1), weight=1)
+        row += 1
 
-        self._stamp_inner = tk.Frame(self._stamp_canvas)
-        self._stamp_canvas.create_window((0, 0), window=self._stamp_inner, anchor=tk.NW)
-        self._stamp_inner.bind("<Configure>",
-            lambda e: self._stamp_canvas.configure(scrollregion=self._stamp_canvas.bbox("all")))
+        # ── Instance Editing Section ─────────────────────────────────
+        self._build_separator(row)
+        row += 1
 
-        # === Instance Editing ===
-        self._edit_frame = tk.LabelFrame(self, text="编辑章", padx=5, pady=5)
-        self._edit_frame.pack(fill=tk.X, padx=5, pady=5)
+        self._build_section_heading("编辑章", row)
+        row += 1
 
-        self._editing_label = tk.Label(self._edit_frame, text="双击模板添加印章到页面", fg="gray")
-        self._editing_label.pack(fill=tk.X)
+        self._editing_label = ctk.CTkLabel(
+            self,
+            text="双击模板添加印章到页面",
+            font=(Fonts.FAMILY, Fonts.BODY_SIZE),
+            text_color=Colors.TEXT_SECONDARY,
+        )
+        self._editing_label.grid(row=row, column=0, padx=8, pady=(2, 4), sticky="ew")
+        row += 1
 
-        # Size slider
-        size_frame = tk.Frame(self._edit_frame)
-        size_frame.pack(fill=tk.X, pady=2)
-        tk.Label(size_frame, text="大小:").pack(side=tk.LEFT)
-        self._size_label = tk.Label(size_frame, text="20%", width=5)
-        self._size_label.pack(side=tk.RIGHT)
-        self._size_var = tk.DoubleVar(value=20.0)
-        self._size_slider = ttk.Scale(size_frame, from_=5, to=80, orient=tk.HORIZONTAL,
-                                       variable=self._size_var, command=self._on_size_changed)
-        self._size_slider.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=5)
-        self._size_slider.config(state='disabled')
+        # Sliders
+        self._size_slider, self._size_label = self._add_slider_row(
+            row, "大  小", 5, 80, "%", self._on_size_changed)
+        row += 2
 
-        # Opacity slider
-        opacity_frame = tk.Frame(self._edit_frame)
-        opacity_frame.pack(fill=tk.X, pady=2)
-        tk.Label(opacity_frame, text="透明度:").pack(side=tk.LEFT)
-        self._opacity_label = tk.Label(opacity_frame, text="100%", width=5)
-        self._opacity_label.pack(side=tk.RIGHT)
-        self._opacity_var = tk.DoubleVar(value=100.0)
-        self._opacity_slider = ttk.Scale(opacity_frame, from_=0, to=100, orient=tk.HORIZONTAL,
-                                          variable=self._opacity_var, command=self._on_opacity_changed)
-        self._opacity_slider.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=5)
-        self._opacity_slider.config(state='disabled')
+        self._opacity_slider, self._opacity_label = self._add_slider_row(
+            row, "透明度", 0, 100, "%", self._on_opacity_changed)
+        row += 2
 
-        # Rotation slider
-        rotation_frame = tk.Frame(self._edit_frame)
-        rotation_frame.pack(fill=tk.X, pady=2)
-        tk.Label(rotation_frame, text="旋转:").pack(side=tk.LEFT)
-        self._rotation_label = tk.Label(rotation_frame, text="0°", width=5)
-        self._rotation_label.pack(side=tk.RIGHT)
-        self._rotation_var = tk.DoubleVar(value=0.0)
-        self._rotation_slider = ttk.Scale(rotation_frame, from_=0, to=360, orient=tk.HORIZONTAL,
-                                           variable=self._rotation_var, command=self._on_rotation_changed)
-        self._rotation_slider.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=5)
-        self._rotation_slider.config(state='disabled')
+        self._rotation_slider, self._rotation_label = self._add_slider_row(
+            row, "旋  转", 0, 360, "°", self._on_rotation_changed)
+        row += 2
 
-        # === Page Navigation ===
-        nav_frame = tk.LabelFrame(self, text="预览页", padx=5, pady=5)
-        nav_frame.pack(fill=tk.X, padx=5, pady=5)
+        # ── Page Navigation ──────────────────────────────────────────
+        self._build_separator(row)
+        row += 1
 
-        self._prev_btn = tk.Button(nav_frame, text="<", width=3, command=self._prev_page)
-        self._prev_btn.pack(side=tk.LEFT)
+        self._build_section_heading("预览页", row)
+        row += 1
 
-        self._page_label = tk.Label(nav_frame, text="- / -", width=8)
-        self._page_label.pack(side=tk.LEFT, expand=True)
+        nav_frame = ctk.CTkFrame(self, fg_color="transparent")
+        nav_frame.grid(row=row, column=0, padx=8, pady=(4, 12), sticky="ew")
+        nav_frame.grid_columnconfigure(1, weight=1)
 
-        self._next_btn = tk.Button(nav_frame, text=">", width=3, command=self._next_page)
-        self._next_btn.pack(side=tk.LEFT)
+        prev_btn = ctk.CTkButton(
+            nav_frame, text="◀", width=36, height=30,
+            fg_color=Colors.BG_CARD, hover_color="#33374A",
+            text_color=Colors.TEXT_ON_DARK,
+            font=("", 14), corner_radius=6,
+            command=self._prev_page,
+        )
+        prev_btn.grid(row=0, column=0, padx=(0, 4))
 
-    # === Template Library Methods ===
+        self._page_label = ctk.CTkLabel(
+            nav_frame, text="- / -",
+            font=(Fonts.FAMILY, Fonts.HEADING_SIZE),
+            text_color=Colors.TEXT_ON_DARK,
+        )
+        self._page_label.grid(row=0, column=1, sticky="ew")
+
+        next_btn = ctk.CTkButton(
+            nav_frame, text="▶", width=36, height=30,
+            fg_color=Colors.BG_CARD, hover_color="#33374A",
+            text_color=Colors.TEXT_ON_DARK,
+            font=("", 14), corner_radius=6,
+            command=self._next_page,
+        )
+        next_btn.grid(row=0, column=2, padx=(4, 0))
+
+    def _build_section_heading(self, text: str, row: int):
+        """Create a compact section heading with gold left accent."""
+        label = ctk.CTkLabel(
+            self, text=text,
+            font=(Fonts.FAMILY, Fonts.HEADING_SIZE, "bold"),
+            text_color=Colors.GOLD,
+        )
+        label.grid(row=row, column=0, padx=(14, 8), pady=(6, 2), sticky="w")
+
+    def _build_separator(self, row: int):
+        """Create a thin gold separator line between sections."""
+        sep = ctk.CTkFrame(self, height=1, fg_color=Colors.GOLD)
+        sep.grid(row=row, column=0, padx=16, pady=(6, 2), sticky="ew")
+
+    def _add_slider_row(self, row, label_text, from_val, to_val, unit, callback):
+        """Create a labeled slider row. Returns (slider, value_label)."""
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.grid(row=row, column=0, padx=8, sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+
+        name_label = ctk.CTkLabel(
+            header, text=label_text,
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+            text_color=Colors.TEXT_ON_DARK,
+        )
+        name_label.grid(row=0, column=0, sticky="w")
+
+        val_label = ctk.CTkLabel(
+            header, text=f"{from_val}{unit}",
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+            text_color=Colors.TEXT_SECONDARY,
+        )
+        val_label.grid(row=0, column=1, sticky="e")
+
+        slider = ctk.CTkSlider(
+            self, from_=from_val, to=to_val,
+            height=16, corner_radius=4,
+            button_color=Colors.PRIMARY,
+            button_hover_color=Colors.PRIMARY_DARK,
+            progress_color=Colors.PRIMARY,
+            fg_color=Colors.GOLD,
+            number_of_steps=to_val - from_val,
+            command=lambda v, u=unit, vl=val_label, cb=callback: cb(v, u, vl),
+        )
+        slider.set(from_val)
+        slider.grid(row=row + 1, column=0, padx=12, pady=(2, 8), sticky="ew")
+
+        return slider, val_label
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  Stamp Library
+    # ═══════════════════════════════════════════════════════════════════
 
     def _import_stamp(self):
         path = filedialog.askopenfilename(
@@ -150,123 +238,30 @@ class ControlsPanel(tk.Frame):
             self._refresh_stamp_list()
 
     def _refresh_stamp_list(self):
-        for w in self._stamp_inner.winfo_children():
-            w.destroy()
-        self._stamp_previews.clear()
+        for child in self._scroll_frame.winfo_children():
+            child.destroy()
 
         if not self._stamp_manager:
             return
 
-        self._stamps = self._stamp_manager.list_stamps()
+        stamps = self._stamp_manager.list_stamps()
+        for idx, stamp in enumerate(stamps):
+            row_idx = idx // 2
+            col_idx = idx % 2
 
-        for idx, stamp in enumerate(self._stamps):
-            row = idx // 2
-            col = idx % 2
-            self._add_stamp_item(stamp, row, col)
+            card = StampCard(
+                stamp, self._scroll_frame,
+                on_double_click=self._on_card_double_click,
+                on_delete_requested=self._delete_stamp,
+                on_drag_start=self._start_stamp_drag,
+            )
+            card.grid(row=row_idx, column=col_idx, padx=4, pady=4, sticky="nsew")
 
         self._update_edit_controls()
 
-    def _add_stamp_item(self, stamp: StampData, row: int, col: int):
-        container = tk.Frame(self._stamp_inner, relief=tk.RIDGE, bd=1, cursor="hand2")
-        container.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
-        self._stamp_inner.columnconfigure(col, weight=1)
-
-        img = stamp.get_image()
-        thumb_size = 100
-        img.thumbnail((thumb_size, thumb_size), Image.LANCZOS)
-        photo = ImageTk.PhotoImage(img)
-        self._stamp_previews[stamp.id] = photo
-
-        lbl_img = tk.Label(container, image=photo, cursor="hand2")
-        lbl_img.pack(padx=5, pady=(5, 2))
-
-        lbl_name = tk.Label(container, text=stamp.name, font=("Arial", 9), cursor="hand2")
-        lbl_name.pack()
-
-        # Delete template button
-        btn_del = tk.Label(container, text="删除", fg="red", cursor="hand2",
-                           font=("Arial", 9, "underline"))
-        btn_del.pack(fill=tk.X, padx=2, pady=(0, 2))
-        btn_del.bind("<Button-1>", lambda e, sid=stamp.id: self._delete_stamp(sid))
-
-        # Double-click to create instance
-        def on_double_click(e, sid=stamp.id):
-            self._on_stamp_double_click(sid)
-
-        # Drag to create instance — press starts drag, release triggers create
-        def on_drag_start(e, sid=stamp.id, photo_img=photo):
-            self._start_stamp_drag(e, sid, photo_img)
-
-        for widget in (container, lbl_img, lbl_name):
-            widget.bind("<Double-Button-1>", on_double_click)
-            widget.bind("<ButtonPress-1>", on_drag_start)
-
-    def _on_stamp_double_click(self, template_id: str):
-        """Handle double-click on template - create instance"""
+    def _on_card_double_click(self, stamp_id: str):
         if self.on_create_instance:
-            self.on_create_instance(template_id)
-
-    def _start_stamp_drag(self, event, template_id: str, photo_img):
-        """开始拖拽模板 — 创建浮动缩略图跟随鼠标"""
-        self._drag_template_id = template_id
-        self._drag_window = tk.Toplevel(self)
-        self._drag_window.overrideredirect(True)
-        self._drag_window.attributes("-alpha", 0.7)
-
-        lbl = tk.Label(self._drag_window, image=photo_img)
-        lbl.pack()
-        self._drag_photo_ref = photo_img
-
-        self._drag_window.geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
-
-        # 绑定全局拖拽事件到根窗口
-        root = self.winfo_toplevel()
-        self._drag_motion_binding = root.bind("<B1-Motion>", self._on_stamp_drag_motion)
-        self._drag_release_binding = root.bind("<ButtonRelease-1>", self._on_stamp_drag_release_global)
-
-    def _on_stamp_drag_motion(self, event):
-        """拖拽移动 — 浮动窗口跟随鼠标"""
-        if hasattr(self, '_drag_window') and self._drag_window.winfo_exists():
-            self._drag_window.geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
-
-    def _on_stamp_drag_release_global(self, event):
-        """拖拽释放 — 检测是否在预览区，触发创建实例"""
-        # 清理全局绑定
-        root = self.winfo_toplevel()
-        if hasattr(self, '_drag_motion_binding'):
-            root.unbind("<B1-Motion>", self._drag_motion_binding)
-        if hasattr(self, '_drag_release_binding'):
-            root.unbind("<ButtonRelease-1>", self._drag_release_binding)
-
-        # 关闭浮动窗口
-        if hasattr(self, '_drag_window') and self._drag_window.winfo_exists():
-            self._drag_window.destroy()
-
-        # 检测释放位置是否在预览区
-        template_id = getattr(self, '_drag_template_id', None)
-        if template_id is None:
-            return
-
-        target = getattr(self, '_drop_target', None)
-        if target is None:
-            return
-
-        try:
-            target_x = target.winfo_rootx()
-            target_y = target.winfo_rooty()
-            target_w = target.winfo_width()
-            target_h = target.winfo_height()
-
-            if (target_x <= event.x_root <= target_x + target_w and
-                    target_y <= event.y_root <= target_y + target_h):
-                self._on_stamp_drag_release(template_id)
-        except tk.TclError:
-            pass
-
-    def _on_stamp_drag_release(self, template_id: str):
-        """拖拽释放回调 — 创建实例"""
-        if self.on_create_instance:
-            self.on_create_instance(template_id)
+            self.on_create_instance(stamp_id)
 
     def _delete_stamp(self, stamp_id: str):
         if not self._stamp_manager:
@@ -279,28 +274,82 @@ class ControlsPanel(tk.Frame):
             return
 
         self._stamp_manager.delete_stamp(stamp_id)
-        if self._editing_instance_id:
-            # Check if editing instance belongs to deleted template
-            if self._instance_manager:
-                inst = self._instance_manager.get_instance(self._editing_instance_id)
-                if inst and inst.template_id == stamp_id:
-                    self._editing_instance_id = None
+        if self._editing_instance_id and self._instance_manager:
+            inst = self._instance_manager.get_instance(self._editing_instance_id)
+            if inst and inst.template_id == stamp_id:
+                self._editing_instance_id = None
         self._refresh_stamp_list()
 
-    # === Instance Editing Methods ===
+    def _start_stamp_drag(self, event, template_id: str, thumb_img):
+        """Start floating drag from stamp card."""
+        import tkinter as tk
+
+        self._drag_template_id = template_id
+        self._drag_window = tk.Toplevel(self)
+        self._drag_window.overrideredirect(True)
+        self._drag_window.attributes("-alpha", 0.7)
+
+        from PIL import ImageTk
+        photo = ImageTk.PhotoImage(thumb_img)
+        lbl = tk.Label(self._drag_window, image=photo)
+        lbl.pack()
+        self._drag_photo_ref = photo
+
+        self._drag_window.geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+
+        root = self.winfo_toplevel()
+        self._drag_motion_binding = root.bind("<B1-Motion>", self._on_stamp_drag_motion)
+        self._drag_release_binding = root.bind("<ButtonRelease-1>", self._on_stamp_drag_release)
+
+    def _on_stamp_drag_motion(self, event):
+        if hasattr(self, '_drag_window') and self._drag_window.winfo_exists():
+            self._drag_window.geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+
+    def _on_stamp_drag_release(self, event):
+        import tkinter as tk
+
+        root = self.winfo_toplevel()
+        if hasattr(self, '_drag_motion_binding'):
+            root.unbind("<B1-Motion>", self._drag_motion_binding)
+        if hasattr(self, '_drag_release_binding'):
+            root.unbind("<ButtonRelease-1>", self._drag_release_binding)
+
+        if hasattr(self, '_drag_window') and self._drag_window.winfo_exists():
+            self._drag_window.destroy()
+
+        template_id = getattr(self, '_drag_template_id', None)
+        if template_id is None:
+            return
+
+        target = getattr(self, '_drop_target', None)
+        if target is None:
+            return
+
+        try:
+            tx = target.winfo_rootx()
+            ty = target.winfo_rooty()
+            tw = target.winfo_width()
+            th = target.winfo_height()
+
+            if (tx <= event.x_root <= tx + tw and ty <= event.y_root <= ty + th):
+                if self.on_create_instance:
+                    self.on_create_instance(template_id)
+        except tk.TclError:
+            pass
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  Instance Editing
+    # ═══════════════════════════════════════════════════════════════════
 
     def _update_edit_controls(self):
         if not self._editing_instance_id or not self._instance_manager:
-            self._editing_label.config(text="双击模板添加印章到页面", fg="gray")
-            self._size_slider.config(state='disabled')
-            self._size_var.set(20.0)
-            self._size_label.config(text="20%")
-            self._opacity_slider.config(state='disabled')
-            self._opacity_var.set(100.0)
-            self._opacity_label.config(text="100%")
-            self._rotation_slider.config(state='disabled')
-            self._rotation_var.set(0.0)
-            self._rotation_label.config(text="0°")
+            self._editing_label.configure(text="双击模板添加印章到页面", text_color=Colors.TEXT_SECONDARY)
+            self._size_slider.set(20)
+            self._size_label.configure(text="20%")
+            self._opacity_slider.set(68)
+            self._opacity_label.configure(text="68%")
+            self._rotation_slider.set(0)
+            self._rotation_label.configure(text="0°")
             return
 
         inst = self._instance_manager.get_instance(self._editing_instance_id)
@@ -309,57 +358,47 @@ class ControlsPanel(tk.Frame):
             self._update_edit_controls()
             return
 
-        # Resolve template name
         template_name = "未知"
         if self._stamp_manager:
             tmpl = self._stamp_manager.get_stamp(inst.template_id)
             if tmpl:
                 template_name = tmpl.name
 
-        self._editing_label.config(
-            text=f"编辑「{template_name}」- 第{inst.page_index + 1}页",
-            fg="black"
+        self._editing_label.configure(
+            text=f"「{template_name}」 第 {inst.page_index + 1} 页",
+            text_color=Colors.PRIMARY_LIGHT,
         )
 
-        self._size_var.set(inst.size_ratio * 100)
-        self._size_label.config(text=f"{inst.size_ratio * 100:.0f}%")
-        self._size_slider.config(state='normal')
+        self._size_slider.set(inst.size_ratio * 100)
+        self._size_label.configure(text=f"{inst.size_ratio * 100:.0f}%")
 
-        self._opacity_var.set(inst.opacity * 100)
-        self._opacity_label.config(text=f"{inst.opacity * 100:.0f}%")
-        self._opacity_slider.config(state='normal')
+        self._opacity_slider.set(inst.opacity * 100)
+        self._opacity_label.configure(text=f"{inst.opacity * 100:.0f}%")
 
-        self._rotation_var.set(inst.rotation)
-        self._rotation_label.config(text=f"{inst.rotation:.0f}°")
-        self._rotation_slider.config(state='normal')
+        self._rotation_slider.set(inst.rotation)
+        self._rotation_label.configure(text=f"{inst.rotation:.0f}°")
 
-    def _on_size_changed(self, val):
-        pct = float(val)
-        self._size_label.config(text=f"{pct:.0f}%")
+    def _on_size_changed(self, value, unit, label):
+        pct = float(value)
+        label.configure(text=f"{pct:.0f}{unit}")
         if self._editing_instance_id and self.on_instance_property_changed:
             self.on_instance_property_changed(self._editing_instance_id, size_ratio=pct / 100.0)
 
-    def _on_opacity_changed(self, val):
-        pct = float(val)
-        self._opacity_label.config(text=f"{pct:.0f}%")
+    def _on_opacity_changed(self, value, unit, label):
+        pct = float(value)
+        label.configure(text=f"{pct:.0f}{unit}")
         if self._editing_instance_id and self.on_instance_property_changed:
             self.on_instance_property_changed(self._editing_instance_id, opacity=pct / 100.0)
 
-    def _on_rotation_changed(self, val):
-        deg = float(val)
-        self._rotation_label.config(text=f"{deg:.0f}°")
+    def _on_rotation_changed(self, value, unit, label):
+        deg = float(value)
+        label.configure(text=f"{deg:.0f}{unit}")
         if self._editing_instance_id and self.on_instance_property_changed:
             self.on_instance_property_changed(self._editing_instance_id, rotation=deg)
 
-    # Callback property for instance property changes
-    on_instance_property_changed = None
-
-    # === Page Navigation Methods ===
-
-    def set_pages(self, count: int):
-        self._page_count = count
-        self._current_preview = 0
-        self._update_nav_label()
+    # ═══════════════════════════════════════════════════════════════════
+    #  Page Navigation
+    # ═══════════════════════════════════════════════════════════════════
 
     def _prev_page(self):
         if self._page_count > 0:
@@ -377,6 +416,6 @@ class ControlsPanel(tk.Frame):
 
     def _update_nav_label(self):
         if self._page_count == 0:
-            self._page_label.config(text="- / -")
+            self._page_label.configure(text="- / -")
         else:
-            self._page_label.config(text=f"{self._current_preview + 1} / {self._page_count}")
+            self._page_label.configure(text=f"{self._current_preview + 1}  /  {self._page_count}")

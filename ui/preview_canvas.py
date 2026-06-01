@@ -1,9 +1,15 @@
+"""Document preview canvas — CTkFrame wrapping tk.Canvas for page display and stamp interaction."""
+
 import tkinter as tk
-from PIL import Image, ImageTk
 from typing import List, Optional, Dict
+
+from PIL import Image, ImageTk
+
+import customtkinter as ctk
 
 from processing.stamp import apply_opacity, apply_rotation
 from processing.stamp_instance import StampInstance
+from ui.theme import Colors, Fonts
 
 
 def build_instance_display_data(
@@ -12,7 +18,7 @@ def build_instance_display_data(
     disp_w: int,
     disp_h: int
 ) -> List[tuple]:
-    """Build display data (width, height, x, y) for each instance, with rotation/opactiy applied.
+    """Build display data (width, height, x, y) for each instance, with rotation/opacity applied.
 
     Returns list of (stamp_display_w, stamp_display_h, pos_x_px, pos_y_px, processed_img).
     """
@@ -24,20 +30,15 @@ def build_instance_display_data(
 
         img = img.copy()
 
-        # Apply opacity
         if inst.opacity < 1.0:
             img = apply_opacity(img, inst.opacity)
-
-        # Apply rotation
         if inst.rotation != 0:
             img = apply_rotation(img, inst.rotation)
 
-        # Scale to display size
         stamp_w = max(1, int(disp_w * inst.size_ratio))
         stamp_h = max(1, int(img.height * stamp_w / img.width))
         img = img.resize((stamp_w, stamp_h), Image.LANCZOS)
 
-        # After rotation, the bounding box may have expanded
         x = int(inst.pos_x * disp_w)
         y = int(inst.pos_y * disp_h)
 
@@ -46,22 +47,26 @@ def build_instance_display_data(
     return result
 
 
-class PreviewCanvas(tk.Frame):
+class PreviewCanvas(ctk.CTkFrame):
+    """Document preview with interactive stamp overlays using tkinter Canvas."""
+
     def __init__(self, parent,
                  on_stamp_position_changed=None,
                  on_delete_instance=None,
                  on_instance_selected=None,
-                 on_drag_end=None,
-                 **kwargs):
-        super().__init__(parent, **kwargs)
+                 on_drag_end=None):
+        super().__init__(parent, fg_color=Colors.BG_DARK)
+
         self.on_stamp_position_changed = on_stamp_position_changed
         self.on_delete_instance = on_delete_instance
         self.on_instance_selected = on_instance_selected
         self.on_drag_end = on_drag_end
 
-        self.canvas = tk.Canvas(self, bg="#2b2b2b", cursor="crosshair")
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+        # Inner canvas
+        self.canvas = tk.Canvas(self, bg=Colors.BG_DARK, highlightthickness=0, cursor="crosshair")
+        self.canvas.pack(fill="both", expand=True)
 
+        # State
         self._photo = None
         self._preview_size = (800, 600)
         self._offset = (0, 0)
@@ -76,33 +81,45 @@ class PreviewCanvas(tk.Frame):
         self._dragging_instance_id: Optional[str] = None
         self._drag_start_pos = (0, 0)
 
+        self._has_document = False
+
+        # Canvas event bindings
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Configure>", self._on_resize)
 
-        # Backspace delete
+        # Keyboard delete
         self.canvas.bind("<BackSpace>", self._on_backspace)
         self.canvas.bind("<Delete>", self._on_backspace)
 
-        # Right-click context menu
+        # Context menu
         self.canvas.bind("<Button-2>", self._on_right_click)
         self.canvas.bind("<Button-3>", self._on_right_click)
 
         self._context_menu = tk.Menu(self, tearoff=0)
         self._context_menu.add_command(label="删除", command=self._delete_selected)
 
-        # For focus
+        # Focus on hover for keyboard events
         self.canvas.bind("<Enter>", lambda e: self.canvas.focus_set())
+
+        # File drop via tkinterdnd2
+        self._setup_file_drop()
+
+    # ── Public API ───────────────────────────────────────────────────
 
     def update_preview(self, page_img: Image.Image, instances: List[StampInstance],
                        template_images: Dict[str, Image.Image]):
+        """Refresh the preview with a new page image and stamp instances."""
         if page_img is None:
             return
+        self._has_document = True
         self._last_page_img = page_img
         self._last_instances = instances if instances else []
         self._template_images = template_images if template_images else {}
         self._render()
+
+    # ── Rendering ────────────────────────────────────────────────────
 
     def _render(self):
         page_img = self._last_page_img
@@ -122,7 +139,7 @@ class PreviewCanvas(tk.Frame):
 
         page_disp = page_img.resize((disp_w, disp_h), Image.LANCZOS).convert("RGBA")
 
-        # Build display data for all instances
+        # Render stamp instances onto page
         self._display_data = []
         for inst in self._last_instances:
             img = self._template_images.get(inst.template_id)
@@ -161,6 +178,41 @@ class PreviewCanvas(tk.Frame):
         if self._selected_instance_id:
             self._draw_selection_border()
 
+    def _render_placeholder(self):
+        """Draw hint text when no document is loaded."""
+        canvas_w = self.canvas.winfo_width()
+        canvas_h = self.canvas.winfo_height()
+        if canvas_w < 2 or canvas_h < 2:
+            return
+
+        self.canvas.delete("all")
+        self._photo = None
+
+        cx = canvas_w // 2
+        cy = canvas_h // 2
+
+        # Dashed gold border
+        self.canvas.create_rectangle(
+            100, 80, canvas_w - 100, canvas_h - 80,
+            outline=Colors.GOLD, width=1, dash=(6, 4)
+        )
+
+        # Main hint
+        self.canvas.create_text(
+            cx, cy - 15,
+            text="打开文档或拖放文件到此处",
+            fill=Colors.TEXT_SECONDARY,
+            font=(Fonts.FAMILY, 14),
+        )
+
+        # Secondary hint
+        self.canvas.create_text(
+            cx, cy + 15,
+            text="支持 PDF · 图片 · Excel",
+            fill="#4A4558",
+            font=(Fonts.FAMILY, 11),
+        )
+
     def _draw_selection_border(self):
         for data in self._display_data:
             if data is None:
@@ -169,14 +221,13 @@ class PreviewCanvas(tk.Frame):
             if inst_id == self._selected_instance_id:
                 ox, oy = self._offset
                 self.canvas.create_rectangle(
-                    ox + x - 2, oy + y - 2,
-                    ox + x + sw + 2, oy + y + sh + 2,
-                    outline="#00aaff", width=2
+                    ox + x - 3, oy + y - 3,
+                    ox + x + sw + 3, oy + y + sh + 3,
+                    outline=Colors.ACCENT_SELECTION, width=2
                 )
                 break
 
-    def _on_resize(self, event):
-        self._render()
+    # ── Coordinate Conversion ────────────────────────────────────────
 
     def _canvas_to_ratio(self, cx: int, cy: int) -> tuple:
         ox, oy = self._offset
@@ -202,6 +253,8 @@ class PreviewCanvas(tk.Frame):
             if x1 <= ratio_x <= x2 and y1 <= ratio_y <= y2:
                 return inst_id
         return None
+
+    # ── Interaction ──────────────────────────────────────────────────
 
     def _on_press(self, event):
         if not self._last_instances:
@@ -251,6 +304,12 @@ class PreviewCanvas(tk.Frame):
         if was_dragging and self.on_drag_end:
             self.on_drag_end()
 
+    def _on_resize(self, event):
+        if self._has_document:
+            self._render()
+        else:
+            self._render_placeholder()
+
     def _on_backspace(self, event):
         self._delete_selected()
 
@@ -265,3 +324,46 @@ class PreviewCanvas(tk.Frame):
     def _delete_selected(self):
         if self._selected_instance_id and self.on_delete_instance:
             self.on_delete_instance(self._selected_instance_id)
+
+    # ── File Drop ────────────────────────────────────────────────────
+
+    def _setup_file_drop(self):
+        """Register canvas for OS-level file drag-drop.
+
+        Try tkinterdnd2 first, fall back to raw Tcl tkdnd calls.
+        """
+        try:
+            from tkinterdnd2 import DND_FILES
+            self.canvas.drop_target_register(DND_FILES)
+            self.canvas.dnd_bind("<<Drop>>", self._on_file_drop)
+            return
+        except (ImportError, tk.TclError):
+            pass
+
+        # Fallback: raw Tcl tkdnd extension
+        try:
+            self.canvas.tk.call('tkdnd::drop_target', 'register', self.canvas._w, 'DND_Files')
+            self.canvas.tk.call('bind', self.canvas._w, '<<Drop>>',
+                                f'[list {self.canvas._w}._on_tkdnd_drop %D]')
+            self.canvas._on_tkdnd_drop = lambda data: self._on_file_drop_raw(data)
+        except tk.TclError:
+            pass  # No DnD support available
+
+    def _on_file_drop(self, event):
+        """Handle OS file drop from tkinterdnd2."""
+        toplevel = self.winfo_toplevel()
+        if hasattr(toplevel, 'controller') and hasattr(toplevel.controller, 'on_file_dropped'):
+            toplevel.controller.on_file_dropped(event.data)
+
+    def _on_file_drop_raw(self, data: str):
+        """Handle OS file drop from raw Tcl tkdnd."""
+        toplevel = self.winfo_toplevel()
+        if hasattr(toplevel, 'controller') and hasattr(toplevel.controller, 'on_file_dropped'):
+            toplevel.controller.on_file_dropped(data)
+
+    def _on_file_drop(self, event):
+        """Handle OS file drop onto the canvas."""
+        # Walk up to find the controller
+        toplevel = self.winfo_toplevel()
+        if hasattr(toplevel, 'controller') and hasattr(toplevel.controller, 'on_file_dropped'):
+            toplevel.controller.on_file_dropped(event.data)
