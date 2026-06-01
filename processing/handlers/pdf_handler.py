@@ -5,7 +5,7 @@ from typing import Set, Tuple, Optional
 import io
 
 from processing.base import DocumentHandler
-from processing.stamp import scale_stamp, to_png_bytes
+from processing.stamp import apply_rotation, scale_stamp, to_png_bytes
 
 
 class PDFHandler(DocumentHandler):
@@ -71,18 +71,17 @@ class PDFHandler(DocumentHandler):
         stamp_img: Image.Image,
         position_ratio: Tuple[float, float],
         stamp_size_ratio: float,
-        selected_pages: Set[int]
+        selected_pages: Set[int],
+        rotation: float = 0.0
     ) -> None:
         if self._doc is None:
             raise RuntimeError("文档未加载")
 
         x_ratio, y_ratio = position_ratio
 
-        # 创建新文档并复制所有页面
         out_doc = fitz.open()
         out_doc.insert_pdf(self._doc)
 
-        # 在选中页面添加印章
         for page_idx in selected_pages:
             if page_idx < 0 or page_idx >= len(out_doc):
                 continue
@@ -91,7 +90,11 @@ class PDFHandler(DocumentHandler):
             pw = page.rect.width
             ph = page.rect.height
 
+            # Scale first (based on original dimensions), then rotate
             scaled = scale_stamp(stamp_img, int(pw), stamp_size_ratio)
+            if rotation != 0:
+                scaled = apply_rotation(scaled, rotation)
+
             sw, sh = scaled.size
             x = x_ratio * pw
             y = y_ratio * ph

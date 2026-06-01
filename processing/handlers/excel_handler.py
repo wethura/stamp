@@ -4,7 +4,7 @@ from typing import Set, Tuple, Optional
 import io
 
 from processing.base import DocumentHandler
-from processing.stamp import scale_stamp
+from processing.stamp import apply_rotation, scale_stamp
 
 # 尝试导入 openpyxl，如果失败则提供友好错误信息
 try:
@@ -190,7 +190,8 @@ class ExcelHandler(DocumentHandler):
         stamp_img: Image.Image,
         position_ratio: Tuple[float, float],
         stamp_size_ratio: float,
-        selected_pages: Set[int]
+        selected_pages: Set[int],
+        rotation: float = 0.0
     ) -> None:
         """导出带印章的 Excel 文件
 
@@ -207,19 +208,19 @@ class ExcelHandler(DocumentHandler):
 
             sheet = self._workbook.worksheets[page_idx]
 
-            # 计算 Sheet 的虚拟尺寸
             max_row, max_col = self._sheet_bounds[page_idx]
-            # 使用更大的基础尺寸来匹配 Excel 的实际显示
-            base_width = max(1000, max_col * 80)  # 假设每列约 80 像素
-            base_height = max(800, max_row * 20)   # 假设每行约 20 像素
+            base_width = max(1000, max_col * 80)
+            base_height = max(800, max_row * 20)
 
-            # 计算印章尺寸
+            # Scale first, then rotate
             stamp_width = int(base_width * stamp_size_ratio)
             stamp_height = int(stamp_width * stamp_img.height / stamp_img.width)
 
-            # 缩放印章图像（透明度/旋转已由调用方预处理）
             resample = getattr(Image, "LANCZOS", None) or getattr(Image, "ANTIALIAS")
             scaled_stamp = stamp_img.resize((stamp_width, stamp_height), resample)
+
+            if rotation != 0:
+                scaled_stamp = apply_rotation(scaled_stamp, rotation)
 
             # 将印章保存为字节流
             stamp_bytes = io.BytesIO()

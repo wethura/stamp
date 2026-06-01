@@ -11,7 +11,7 @@ from processing import HandlerRegistry
 from processing.base import DocumentHandler
 from processing.stamp_manager import StampManager
 from processing.stamp_instance import StampInstance, StampInstanceManager
-from processing.stamp import apply_opacity, apply_rotation
+from processing.stamp import apply_opacity
 from processing.handlers.pdf_handler import PDFHandler
 
 
@@ -234,8 +234,6 @@ class App:
 
             if instance.opacity < 1.0:
                 stamp_img = apply_opacity(stamp_img, instance.opacity)
-            if instance.rotation != 0:
-                stamp_img = apply_rotation(stamp_img, instance.rotation)
 
             if is_first:
                 handler = self.handler
@@ -252,6 +250,7 @@ class App:
                 position_ratio=(instance.pos_x, instance.pos_y),
                 stamp_size_ratio=instance.size_ratio,
                 selected_pages={instance.page_index},
+                rotation=instance.rotation,
             )
 
             if handler != self.handler:

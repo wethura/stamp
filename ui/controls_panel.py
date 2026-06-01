@@ -122,8 +122,8 @@ class ControlsPanel(ctk.CTkScrollableFrame):
             row, "透明度", 0, 100, "%", self._on_opacity_changed)
         row += 2
 
-        self._rotation_slider, self._rotation_label = self._add_slider_row(
-            row, "旋  转", 0, 360, "°", self._on_rotation_changed)
+        # ── Rotation controls ──────────────────────────────────────────
+        self._build_rotation_row(row)
         row += 2
 
         # ── Page Navigation ──────────────────────────────────────────
@@ -177,6 +177,119 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         sep.grid(row=row, column=0, padx=16, pady=(6, 2), sticky="ew")
 
     def _add_slider_row(self, row, label_text, from_val, to_val, unit, callback):
+        """Create a labeled slider row. Returns (slider, value_label)."""
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.grid(row=row, column=0, padx=8, sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+
+        name_label = ctk.CTkLabel(
+            header, text=label_text,
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+            text_color=Colors.TEXT_ON_DARK,
+        )
+        name_label.grid(row=0, column=0, sticky="w")
+
+        val_label = ctk.CTkLabel(
+            header, text=f"{from_val}{unit}",
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+            text_color=Colors.TEXT_SECONDARY,
+        )
+        val_label.grid(row=0, column=1, sticky="e")
+
+        slider = ctk.CTkSlider(
+            self, from_=from_val, to=to_val,
+            height=16, corner_radius=4,
+            button_color=Colors.PRIMARY,
+            button_hover_color=Colors.PRIMARY_DARK,
+            progress_color=Colors.PRIMARY,
+            fg_color=Colors.GOLD,
+            number_of_steps=to_val - from_val,
+            command=lambda v, u=unit, vl=val_label, cb=callback: cb(v, u, vl),
+        )
+        slider.set(from_val)
+        slider.grid(row=row + 1, column=0, padx=12, pady=(2, 8), sticky="ew")
+
+        return slider, val_label
+
+    def _build_rotation_row(self, row):
+        """Create rotation controls: left 90°, input field, right 90°."""
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.grid(row=row, column=0, padx=8, sticky="ew")
+        header.grid_columnconfigure(1, weight=1)
+
+        label = ctk.CTkLabel(
+            header, text="旋  转",
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+            text_color=Colors.TEXT_ON_DARK,
+        )
+        label.grid(row=0, column=0, sticky="w")
+
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.grid(row=row + 1, column=0, padx=8, pady=(2, 8), sticky="ew")
+        btn_frame.grid_columnconfigure(1, weight=1)
+
+        left_btn = ctk.CTkButton(
+            btn_frame, text="◀ 90°", width=50, height=28,
+            fg_color=Colors.BG_CARD, hover_color="#33374A",
+            text_color=Colors.TEXT_ON_DARK,
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE), corner_radius=6,
+            command=self._rotate_left,
+        )
+        left_btn.grid(row=0, column=0, padx=(0, 4))
+
+        self._rotation_entry = ctk.CTkEntry(
+            btn_frame, width=60, height=28,
+            font=(Fonts.FAMILY, Fonts.BODY_SIZE),
+            fg_color=Colors.BG_CARD, text_color=Colors.TEXT_ON_DARK,
+            border_width=1, corner_radius=6, justify="center",
+        )
+        self._rotation_entry.insert(0, "0")
+        self._rotation_entry.grid(row=0, column=1, sticky="ew")
+        self._rotation_entry.bind("<Return>", self._on_rotation_entry)
+        self._rotation_entry.bind("<FocusOut>", self._on_rotation_entry)
+
+        right_btn = ctk.CTkButton(
+            btn_frame, text="90° ▶", width=50, height=28,
+            fg_color=Colors.BG_CARD, hover_color="#33374A",
+            text_color=Colors.TEXT_ON_DARK,
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE), corner_radius=6,
+            command=self._rotate_right,
+        )
+        right_btn.grid(row=0, column=2, padx=(4, 0))
+
+    def _rotate_left(self):
+        if not self._editing_instance_id:
+            return
+        inst = self._instance_manager.get_instance(self._editing_instance_id)
+        if inst is None:
+            return
+        new_angle = (inst.rotation - 90) % 360
+        self._apply_rotation(new_angle)
+
+    def _rotate_right(self):
+        if not self._editing_instance_id:
+            return
+        inst = self._instance_manager.get_instance(self._editing_instance_id)
+        if inst is None:
+            return
+        new_angle = (inst.rotation + 90) % 360
+        self._apply_rotation(new_angle)
+
+    def _on_rotation_entry(self, event=None):
+        if not self._editing_instance_id:
+            return
+        text = self._rotation_entry.get().strip().replace("°", "")
+        try:
+            angle = float(text) % 360
+        except ValueError:
+            return
+        self._apply_rotation(angle)
+
+    def _apply_rotation(self, angle: float):
+        self._rotation_entry.delete(0, "end")
+        self._rotation_entry.insert(0, f"{angle:.0f}")
+        if self._editing_instance_id and self.on_instance_property_changed:
+            self.on_instance_property_changed(self._editing_instance_id, rotation=angle)
         """Create a labeled slider row. Returns (slider, value_label)."""
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.grid(row=row, column=0, padx=8, sticky="ew")
@@ -348,8 +461,8 @@ class ControlsPanel(ctk.CTkScrollableFrame):
             self._size_label.configure(text="20%")
             self._opacity_slider.set(68)
             self._opacity_label.configure(text="68%")
-            self._rotation_slider.set(0)
-            self._rotation_label.configure(text="0°")
+            self._rotation_entry.delete(0, "end")
+            self._rotation_entry.insert(0, "0")
             return
 
         inst = self._instance_manager.get_instance(self._editing_instance_id)
@@ -375,8 +488,8 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         self._opacity_slider.set(inst.opacity * 100)
         self._opacity_label.configure(text=f"{inst.opacity * 100:.0f}%")
 
-        self._rotation_slider.set(inst.rotation)
-        self._rotation_label.configure(text=f"{inst.rotation:.0f}°")
+        self._rotation_entry.delete(0, "end")
+        self._rotation_entry.insert(0, f"{inst.rotation:.0f}")
 
     def _on_size_changed(self, value, unit, label):
         pct = float(value)
@@ -389,12 +502,6 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         label.configure(text=f"{pct:.0f}{unit}")
         if self._editing_instance_id and self.on_instance_property_changed:
             self.on_instance_property_changed(self._editing_instance_id, opacity=pct / 100.0)
-
-    def _on_rotation_changed(self, value, unit, label):
-        deg = float(value)
-        label.configure(text=f"{deg:.0f}{unit}")
-        if self._editing_instance_id and self.on_instance_property_changed:
-            self.on_instance_property_changed(self._editing_instance_id, rotation=deg)
 
     # ═══════════════════════════════════════════════════════════════════
     #  Page Navigation

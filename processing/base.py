@@ -96,7 +96,8 @@ class DocumentHandler(ABC):
         stamp_img: Image.Image,
         position_ratio: Tuple[float, float],
         stamp_size_ratio: float,
-        selected_pages: Set[int]
+        selected_pages: Set[int],
+        rotation: float = 0.0
     ) -> None:
         """导出带章的文档
 
@@ -106,6 +107,7 @@ class DocumentHandler(ABC):
             position_ratio: 印章位置比例 (x, y)，范围 0.0~1.0
             stamp_size_ratio: 印章大小比例（相对于页面宽度）
             selected_pages: 选中的页面索引集合
+            rotation: 旋转角度（度）
         """
         pass
 

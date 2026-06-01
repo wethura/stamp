@@ -30,14 +30,15 @@ def build_instance_display_data(
 
         img = img.copy()
 
+        # Scale first (based on original dimensions), then rotate
+        stamp_w = max(1, int(disp_w * inst.size_ratio))
+        stamp_h = max(1, int(img.height * stamp_w / img.width))
+        img = img.resize((stamp_w, stamp_h), Image.LANCZOS)
+
         if inst.opacity < 1.0:
             img = apply_opacity(img, inst.opacity)
         if inst.rotation != 0:
             img = apply_rotation(img, inst.rotation)
-
-        stamp_w = max(1, int(disp_w * inst.size_ratio))
-        stamp_h = max(1, int(img.height * stamp_w / img.width))
-        img = img.resize((stamp_w, stamp_h), Image.LANCZOS)
 
         x = int(inst.pos_x * disp_w)
         y = int(inst.pos_y * disp_h)
@@ -149,14 +150,15 @@ class PreviewCanvas(ctk.CTkFrame):
 
             img = img.copy()
 
+            # Scale first (based on original dimensions), then rotate
+            stamp_w = max(1, int(disp_w * inst.size_ratio))
+            stamp_h = max(1, int(img.height * stamp_w / img.width))
+            img = img.resize((stamp_w, stamp_h), Image.LANCZOS)
+
             if inst.opacity < 1.0:
                 img = apply_opacity(img, inst.opacity)
             if inst.rotation != 0:
                 img = apply_rotation(img, inst.rotation)
-
-            stamp_w = max(1, int(disp_w * inst.size_ratio))
-            stamp_h = max(1, int(img.height * stamp_w / img.width))
-            img = img.resize((stamp_w, stamp_h), Image.LANCZOS)
 
             x = int(inst.pos_x * disp_w)
             y = int(inst.pos_y * disp_h)

@@ -4,7 +4,7 @@ from typing import Set, Tuple, Optional
 import fitz
 
 from processing.base import DocumentHandler
-from processing.stamp import scale_stamp, to_png_bytes
+from processing.stamp import apply_rotation, scale_stamp, to_png_bytes
 
 
 # 支持的图片扩展名
@@ -70,7 +70,8 @@ class ImageHandler(DocumentHandler):
         stamp_img: Image.Image,
         position_ratio: Tuple[float, float],
         stamp_size_ratio: float,
-        selected_pages: Set[int]
+        selected_pages: Set[int],
+        rotation: float = 0.0
     ) -> None:
         if self._img is None or self._path is None:
             raise RuntimeError("图片未加载")
@@ -78,17 +79,16 @@ class ImageHandler(DocumentHandler):
         x_ratio, y_ratio = position_ratio
         img_w, img_h = self._img.size
 
-        # 创建新的 PDF，以图片尺寸为页面尺寸
         out_doc = fitz.open()
         page = out_doc.new_page(width=img_w, height=img_h)
         img_rect = fitz.Rect(0, 0, img_w, img_h)
 
-        # 插入原图
         page.insert_image(img_rect, filename=self._path)
 
-        # 如果选中了第 0 页（唯一的一页），添加印章
         if 0 in selected_pages:
             scaled = scale_stamp(stamp_img, img_w, stamp_size_ratio)
+            if rotation != 0:
+                scaled = apply_rotation(scaled, rotation)
             sw, sh = scaled.size
             x = x_ratio * img_w
             y = y_ratio * img_h
