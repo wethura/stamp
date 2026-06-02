@@ -23,10 +23,10 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         super().__init__(
             parent,
             width=PANEL_WIDTH,
-            fg_color=Colors.BG_DARK,
-            scrollbar_fg_color=Colors.BG_DARK,
-            scrollbar_button_color=Colors.BG_CARD,
-            scrollbar_button_hover_color="#3A3D4E",
+            fg_color=Colors.SURFACE_BASE,
+            scrollbar_fg_color=Colors.SURFACE_BASE,
+            scrollbar_button_color=Colors.SURFACE_RAISED,
+            scrollbar_button_hover_color=Colors.SURFACE_OVERLAY,
         )
 
         self.on_preview_page_changed = on_preview_page_changed
@@ -79,21 +79,22 @@ class ControlsPanel(ctk.CTkScrollableFrame):
             self,
             text="＋ 导入新章",
             fg_color=Colors.PRIMARY,
-            hover_color=Colors.PRIMARY_DARK,
+            hover_color=Colors.PRIMARY_HOVER,
             text_color=Colors.PRIMARY_PALE,
             font=(Fonts.FAMILY, Fonts.BODY_SIZE, "bold"),
             height=32,
             corner_radius=6,
             command=self._import_stamp,
         )
-        import_btn.grid(row=row, column=0, padx=8, pady=(4, 6), sticky="ew")
+        import_btn.grid(row=row, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
         row += 1
 
-        # Scrollable stamp card grid
+        # Scrollable stamp card grid — show one row at a time
+        # Card height (156) + vertical padding (4+4) + row spacing ≈ 170
         self._scroll_frame = ctk.CTkScrollableFrame(
-            self, fg_color="transparent", height=220,
+            self, fg_color="transparent", height=170,
         )
-        self._scroll_frame.grid(row=row, column=0, padx=6, pady=(4, 6), sticky="nsew")
+        self._scroll_frame.grid(row=row, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="nsew")
         self._scroll_frame.grid_columnconfigure((0, 1), weight=1)
         row += 1
 
@@ -110,7 +111,7 @@ class ControlsPanel(ctk.CTkScrollableFrame):
             font=(Fonts.FAMILY, Fonts.BODY_SIZE),
             text_color=Colors.TEXT_SECONDARY,
         )
-        self._editing_label.grid(row=row, column=0, padx=8, pady=(2, 4), sticky="ew")
+        self._editing_label.grid(row=row, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
         row += 1
 
         # Sliders
@@ -134,58 +135,58 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         row += 1
 
         nav_frame = ctk.CTkFrame(self, fg_color="transparent")
-        nav_frame.grid(row=row, column=0, padx=8, pady=(4, 12), sticky="ew")
+        nav_frame.grid(row=row, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_SM, Spacing.PAD_LG), sticky="ew")
         nav_frame.grid_columnconfigure(1, weight=1)
 
         prev_btn = ctk.CTkButton(
             nav_frame, text="◀", width=36, height=30,
-            fg_color=Colors.BG_CARD, hover_color="#33374A",
-            text_color=Colors.TEXT_ON_DARK,
+            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
+            text_color=Colors.TEXT_PRIMARY,
             font=("", 14), corner_radius=6,
             command=self._prev_page,
         )
-        prev_btn.grid(row=0, column=0, padx=(0, 4))
+        prev_btn.grid(row=0, column=0, padx=(0, Spacing.PAD_XS))
 
         self._page_label = ctk.CTkLabel(
             nav_frame, text="- / -",
             font=(Fonts.FAMILY, Fonts.HEADING_SIZE),
-            text_color=Colors.TEXT_ON_DARK,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._page_label.grid(row=0, column=1, sticky="ew")
 
         next_btn = ctk.CTkButton(
             nav_frame, text="▶", width=36, height=30,
-            fg_color=Colors.BG_CARD, hover_color="#33374A",
-            text_color=Colors.TEXT_ON_DARK,
+            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
+            text_color=Colors.TEXT_PRIMARY,
             font=("", 14), corner_radius=6,
             command=self._next_page,
         )
-        next_btn.grid(row=0, column=2, padx=(4, 0))
+        next_btn.grid(row=0, column=2, padx=(Spacing.PAD_XS, 0))
 
     def _build_section_heading(self, text: str, row: int):
-        """Create a compact section heading with gold left accent."""
+        """Create a compact section heading with gold text."""
         label = ctk.CTkLabel(
             self, text=text,
             font=(Fonts.FAMILY, Fonts.HEADING_SIZE, "bold"),
             text_color=Colors.GOLD,
         )
-        label.grid(row=row, column=0, padx=(14, 8), pady=(6, 2), sticky="w")
+        label.grid(row=row, column=0, padx=(Spacing.PAD_MD, Spacing.PAD_SM), pady=(Spacing.PAD_SM, Spacing.PAD_XS), sticky="w")
 
     def _build_separator(self, row: int):
-        """Create a thin gold separator line between sections."""
-        sep = ctk.CTkFrame(self, height=1, fg_color=Colors.GOLD)
-        sep.grid(row=row, column=0, padx=16, pady=(6, 2), sticky="ew")
+        """Create a subtle 1px separator between sections."""
+        sep = ctk.CTkFrame(self, height=1, fg_color=Colors.BORDER_SUBTLE)
+        sep.grid(row=row, column=0, padx=Spacing.PAD_LG, pady=(Spacing.PAD_SM, Spacing.PAD_XS), sticky="ew")
 
     def _add_slider_row(self, row, label_text, from_val, to_val, unit, callback):
         """Create a labeled slider row. Returns (slider, value_label)."""
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=row, column=0, padx=8, sticky="ew")
+        header.grid(row=row, column=0, padx=Spacing.PAD_SM, sticky="ew")
         header.grid_columnconfigure(0, weight=1)
 
         name_label = ctk.CTkLabel(
             header, text=label_text,
             font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
-            text_color=Colors.TEXT_ON_DARK,
+            text_color=Colors.TEXT_PRIMARY,
         )
         name_label.grid(row=0, column=0, sticky="w")
 
@@ -200,48 +201,49 @@ class ControlsPanel(ctk.CTkScrollableFrame):
             self, from_=from_val, to=to_val,
             height=16, corner_radius=4,
             button_color=Colors.PRIMARY,
-            button_hover_color=Colors.PRIMARY_DARK,
+            button_hover_color=Colors.PRIMARY_HOVER,
             progress_color=Colors.PRIMARY,
-            fg_color=Colors.GOLD,
+            fg_color=Colors.SURFACE_OVERLAY,
             number_of_steps=to_val - from_val,
             command=lambda v, u=unit, vl=val_label, cb=callback: cb(v, u, vl),
         )
         slider.set(from_val)
-        slider.grid(row=row + 1, column=0, padx=12, pady=(2, 8), sticky="ew")
+        slider.grid(row=row + 1, column=0, padx=Spacing.PAD_MD, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
 
         return slider, val_label
 
     def _build_rotation_row(self, row):
         """Create rotation controls: left 90°, input field, right 90°."""
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=row, column=0, padx=8, sticky="ew")
+        header.grid(row=row, column=0, padx=Spacing.PAD_SM, sticky="ew")
         header.grid_columnconfigure(1, weight=1)
 
         label = ctk.CTkLabel(
             header, text="旋  转",
             font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
-            text_color=Colors.TEXT_ON_DARK,
+            text_color=Colors.TEXT_PRIMARY,
         )
         label.grid(row=0, column=0, sticky="w")
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=row + 1, column=0, padx=8, pady=(2, 8), sticky="ew")
+        btn_frame.grid(row=row + 1, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
         btn_frame.grid_columnconfigure(1, weight=1)
 
         left_btn = ctk.CTkButton(
             btn_frame, text="◀ 90°", width=50, height=28,
-            fg_color=Colors.BG_CARD, hover_color="#33374A",
-            text_color=Colors.TEXT_ON_DARK,
+            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
+            text_color=Colors.TEXT_PRIMARY,
             font=(Fonts.FAMILY, Fonts.SMALL_SIZE), corner_radius=6,
             command=self._rotate_left,
         )
-        left_btn.grid(row=0, column=0, padx=(0, 4))
+        left_btn.grid(row=0, column=0, padx=(0, Spacing.PAD_XS))
 
         self._rotation_entry = ctk.CTkEntry(
             btn_frame, width=60, height=28,
             font=(Fonts.FAMILY, Fonts.BODY_SIZE),
-            fg_color=Colors.BG_CARD, text_color=Colors.TEXT_ON_DARK,
-            border_width=1, corner_radius=6, justify="center",
+            fg_color=Colors.SURFACE_RAISED, text_color=Colors.TEXT_PRIMARY,
+            border_width=1, border_color=Colors.SURFACE_OVERLAY,
+            corner_radius=6, justify="center",
         )
         self._rotation_entry.insert(0, "0")
         self._rotation_entry.grid(row=0, column=1, sticky="ew")
@@ -250,12 +252,12 @@ class ControlsPanel(ctk.CTkScrollableFrame):
 
         right_btn = ctk.CTkButton(
             btn_frame, text="90° ▶", width=50, height=28,
-            fg_color=Colors.BG_CARD, hover_color="#33374A",
-            text_color=Colors.TEXT_ON_DARK,
+            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
+            text_color=Colors.TEXT_PRIMARY,
             font=(Fonts.FAMILY, Fonts.SMALL_SIZE), corner_radius=6,
             command=self._rotate_right,
         )
-        right_btn.grid(row=0, column=2, padx=(4, 0))
+        right_btn.grid(row=0, column=2, padx=(Spacing.PAD_XS, 0))
 
     def _rotate_left(self):
         if not self._editing_instance_id:
@@ -286,43 +288,11 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         self._apply_rotation(angle)
 
     def _apply_rotation(self, angle: float):
+        """Apply rotation angle to the editing instance."""
         self._rotation_entry.delete(0, "end")
         self._rotation_entry.insert(0, f"{angle:.0f}")
         if self._editing_instance_id and self.on_instance_property_changed:
             self.on_instance_property_changed(self._editing_instance_id, rotation=angle)
-        """Create a labeled slider row. Returns (slider, value_label)."""
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=row, column=0, padx=8, sticky="ew")
-        header.grid_columnconfigure(0, weight=1)
-
-        name_label = ctk.CTkLabel(
-            header, text=label_text,
-            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
-            text_color=Colors.TEXT_ON_DARK,
-        )
-        name_label.grid(row=0, column=0, sticky="w")
-
-        val_label = ctk.CTkLabel(
-            header, text=f"{from_val}{unit}",
-            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
-            text_color=Colors.TEXT_SECONDARY,
-        )
-        val_label.grid(row=0, column=1, sticky="e")
-
-        slider = ctk.CTkSlider(
-            self, from_=from_val, to=to_val,
-            height=16, corner_radius=4,
-            button_color=Colors.PRIMARY,
-            button_hover_color=Colors.PRIMARY_DARK,
-            progress_color=Colors.PRIMARY,
-            fg_color=Colors.GOLD,
-            number_of_steps=to_val - from_val,
-            command=lambda v, u=unit, vl=val_label, cb=callback: cb(v, u, vl),
-        )
-        slider.set(from_val)
-        slider.grid(row=row + 1, column=0, padx=12, pady=(2, 8), sticky="ew")
-
-        return slider, val_label
 
     # ═══════════════════════════════════════════════════════════════════
     #  Stamp Library
@@ -368,7 +338,7 @@ class ControlsPanel(ctk.CTkScrollableFrame):
                 on_delete_requested=self._delete_stamp,
                 on_drag_start=self._start_stamp_drag,
             )
-            card.grid(row=row_idx, column=col_idx, padx=4, pady=4, sticky="nsew")
+            card.grid(row=row_idx, column=col_idx, padx=Spacing.PAD_XS, pady=Spacing.PAD_XS, sticky="nsew")
 
         self._update_edit_controls()
 

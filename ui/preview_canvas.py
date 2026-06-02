@@ -56,7 +56,7 @@ class PreviewCanvas(ctk.CTkFrame):
                  on_delete_instance=None,
                  on_instance_selected=None,
                  on_drag_end=None):
-        super().__init__(parent, fg_color=Colors.BG_DARK)
+        super().__init__(parent, fg_color=Colors.SURFACE_CANVAS)
 
         self.on_stamp_position_changed = on_stamp_position_changed
         self.on_delete_instance = on_delete_instance
@@ -64,7 +64,7 @@ class PreviewCanvas(ctk.CTkFrame):
         self.on_drag_end = on_drag_end
 
         # Inner canvas
-        self.canvas = tk.Canvas(self, bg=Colors.BG_DARK, highlightthickness=0, cursor="crosshair")
+        self.canvas = tk.Canvas(self, bg=Colors.SURFACE_CANVAS, highlightthickness=0, cursor="crosshair")
         self.canvas.pack(fill="both", expand=True)
 
         # State
@@ -193,10 +193,10 @@ class PreviewCanvas(ctk.CTkFrame):
         cx = canvas_w // 2
         cy = canvas_h // 2
 
-        # Dashed gold border
+        # Subtle dashed border
         self.canvas.create_rectangle(
             100, 80, canvas_w - 100, canvas_h - 80,
-            outline=Colors.GOLD, width=1, dash=(6, 4)
+            outline=Colors.SURFACE_OVERLAY, width=1, dash=(6, 4)
         )
 
         # Main hint
@@ -211,8 +211,8 @@ class PreviewCanvas(ctk.CTkFrame):
         self.canvas.create_text(
             cx, cy + 15,
             text="支持 PDF · 图片 · Excel",
-            fill="#4A4558",
-            font=(Fonts.FAMILY, 11),
+            fill=Colors.TEXT_TERTIARY,
+            font=(Fonts.FAMILY, Fonts.BODY_SIZE),
         )
 
     def _draw_selection_border(self):
@@ -352,7 +352,7 @@ class PreviewCanvas(ctk.CTkFrame):
             pass  # No DnD support available
 
     def _on_file_drop(self, event):
-        """Handle OS file drop from tkinterdnd2."""
+        """Handle OS file drop onto the canvas."""
         toplevel = self.winfo_toplevel()
         if hasattr(toplevel, 'controller') and hasattr(toplevel.controller, 'on_file_dropped'):
             toplevel.controller.on_file_dropped(event.data)
@@ -362,10 +362,3 @@ class PreviewCanvas(ctk.CTkFrame):
         toplevel = self.winfo_toplevel()
         if hasattr(toplevel, 'controller') and hasattr(toplevel.controller, 'on_file_dropped'):
             toplevel.controller.on_file_dropped(data)
-
-    def _on_file_drop(self, event):
-        """Handle OS file drop onto the canvas."""
-        # Walk up to find the controller
-        toplevel = self.winfo_toplevel()
-        if hasattr(toplevel, 'controller') and hasattr(toplevel.controller, 'on_file_dropped'):
-            toplevel.controller.on_file_dropped(event.data)

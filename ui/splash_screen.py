@@ -2,7 +2,7 @@
 
 import customtkinter as ctk
 
-from ui.theme import Colors, Fonts
+from ui.theme import Colors, Fonts, Spacing
 
 
 class SplashScreen(ctk.CTkToplevel):
@@ -15,7 +15,7 @@ class SplashScreen(ctk.CTkToplevel):
         self.resizable(False, False)
 
         self.title("盖章工具")
-        self.geometry("420x220")
+        self.geometry("440x240")
         self._center_on_screen()
 
         self._build_ui()
@@ -25,22 +25,26 @@ class SplashScreen(ctk.CTkToplevel):
         self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        x = (sw - 420) // 2
-        y = (sh - 220) // 2
-        self.geometry(f"420x220+{x}+{y}")
+        x = (sw - 440) // 2
+        y = (sh - 240) // 2
+        self.geometry(f"440x240+{x}+{y}")
 
     def _build_ui(self):
-        container = ctk.CTkFrame(self, fg_color=Colors.BG_DARK, corner_radius=12)
+        container = ctk.CTkFrame(self, fg_color=Colors.SURFACE_BASE, corner_radius=12)
         container.pack(fill="both", expand=True, padx=2, pady=2)
+
+        # Brand accent at top
+        accent = ctk.CTkFrame(container, height=2, fg_color=Colors.PRIMARY)
+        accent.place(x=40, rely=0.0, relwidth=0.8)
 
         # Title
         title = ctk.CTkLabel(
             container,
             text="盖章工具",
             font=(Fonts.FAMILY, Fonts.SPLASH_TITLE_SIZE, "bold"),
-            text_color=Colors.TEXT_ON_DARK,
+            text_color=Colors.TEXT_PRIMARY,
         )
-        title.pack(pady=(40, 6))
+        title.pack(pady=(44, Spacing.PAD_SM))
 
         # Subtitle
         subtitle = ctk.CTkLabel(
@@ -49,7 +53,7 @@ class SplashScreen(ctk.CTkToplevel):
             font=("Helvetica", Fonts.SPLASH_SUBTITLE_SIZE),
             text_color=Colors.GOLD,
         )
-        subtitle.pack(pady=(0, 25))
+        subtitle.pack(pady=(0, 28))
 
         # Loading message
         self._loading_label = ctk.CTkLabel(
@@ -58,18 +62,18 @@ class SplashScreen(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SPLASH_LOADING_SIZE),
             text_color=Colors.TEXT_SECONDARY,
         )
-        self._loading_label.pack(pady=(0, 12))
+        self._loading_label.pack(pady=(0, Spacing.PAD_MD))
 
         # Progress bar
         self._progress = ctk.CTkProgressBar(
             container,
             width=320,
-            height=6,
-            fg_color=(Colors.GOLD, Colors.GOLD),
+            height=4,
+            fg_color=Colors.SURFACE_OVERLAY,
             progress_color=Colors.PRIMARY,
-            corner_radius=3,
+            corner_radius=2,
         )
-        self._progress.pack(padx=50)
+        self._progress.pack(padx=60)
         self._progress.set(0)
 
     def update_progress(self, percent: int, message: str = None):

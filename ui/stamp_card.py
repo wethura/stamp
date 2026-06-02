@@ -5,7 +5,7 @@ import tkinter as tk
 import customtkinter as ctk
 from PIL import ImageTk
 
-from ui.theme import Colors, Fonts
+from ui.theme import Colors, Fonts, Spacing
 
 
 class StampCard(ctk.CTkFrame):
@@ -15,8 +15,9 @@ class StampCard(ctk.CTkFrame):
                  on_double_click=None,
                  on_delete_requested=None,
                  on_drag_start=None):
-        super().__init__(parent, width=108, height=156, corner_radius=10,
-                         fg_color=Colors.BG_CARD)
+        super().__init__(parent, width=108, height=156, corner_radius=8,
+                         fg_color=Colors.SURFACE_RAISED,
+                         border_width=1, border_color=Colors.SURFACE_OVERLAY)
         self.grid_propagate(False)
         self.pack_propagate(False)
 
@@ -40,9 +41,9 @@ class StampCard(ctk.CTkFrame):
         self._thumb_pil = img
         self._thumb_photo = ImageTk.PhotoImage(img)
 
-        self._thumb_label = tk.Label(self, image=self._thumb_photo, bg=Colors.BG_CARD,
+        self._thumb_label = tk.Label(self, image=self._thumb_photo, bg=Colors.SURFACE_RAISED,
                                      cursor="hand2", borderwidth=0)
-        self._thumb_label.pack(pady=(8, 2))
+        self._thumb_label.pack(pady=(Spacing.PAD_SM, Spacing.PAD_XS))
 
         # Name
         name = self._stamp.name
@@ -50,7 +51,7 @@ class StampCard(ctk.CTkFrame):
         name_label = ctk.CTkLabel(
             self, text=display_name,
             font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
-            text_color=Colors.TEXT_ON_DARK,
+            text_color=Colors.TEXT_PRIMARY,
         )
         name_label.pack()
 
@@ -58,10 +59,10 @@ class StampCard(ctk.CTkFrame):
         del_btn = ctk.CTkLabel(
             self, text="✕ 删除",
             font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_TERTIARY,
             cursor="hand2",
         )
-        del_btn.pack(fill="x", padx=4, pady=(0, 4))
+        del_btn.pack(fill="x", padx=Spacing.PAD_XS, pady=(0, Spacing.PAD_XS))
 
         # Bind interactions to all child widgets
         for widget in (self, self._thumb_label, name_label):
@@ -72,19 +73,19 @@ class StampCard(ctk.CTkFrame):
 
         del_btn.bind("<Button-1>", lambda e: self._delete())
         del_btn.bind("<Enter>", lambda e: del_btn.configure(text_color=Colors.DANGER))
-        del_btn.bind("<Leave>", lambda e: del_btn.configure(text_color=Colors.TEXT_SECONDARY))
+        del_btn.bind("<Leave>", lambda e: del_btn.configure(text_color=Colors.TEXT_TERTIARY))
 
     @property
     def stamp_id(self) -> str:
         return self._stamp_id
 
     def _on_enter(self, event):
-        self.configure(fg_color="#33374A")
-        self._thumb_label.configure(bg="#33374A")
+        self.configure(fg_color=Colors.SURFACE_OVERLAY, border_color=Colors.SURFACE_HOVER)
+        self._thumb_label.configure(bg=Colors.SURFACE_OVERLAY)
 
     def _on_leave(self, event):
-        self.configure(fg_color=Colors.BG_CARD)
-        self._thumb_label.configure(bg=Colors.BG_CARD)
+        self.configure(fg_color=Colors.SURFACE_RAISED, border_color=Colors.SURFACE_OVERLAY)
+        self._thumb_label.configure(bg=Colors.SURFACE_RAISED)
 
     def _on_double_click_event(self, event):
         if self._on_double_click:

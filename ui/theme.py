@@ -2,7 +2,8 @@
 Centralized theme module for Stamp Tool (CustomTkinter).
 
 Provides visual constants (colors, fonts, spacing) and theme initialization.
-Uses CustomTkinter dark mode with 墨韵 (Ink & Seal) color palette.
+Design language: "Mo Yun" (墨韵 Ink & Seal) — inspired by Linear / Raycast
+layered-surface dark-mode aesthetic with seal-red identity accent.
 """
 
 import os
@@ -22,28 +23,40 @@ _IS_WINDOWS = os.name == "nt"
 
 
 class Colors:
-    """Application color palette — seal-red + ink-black + gold accents."""
+    """Application color palette — layered surfaces + seal-red accent + gold trim."""
 
-    # Seal red (印泥红) — primary accent
+    # ── Surface hierarchy (dark mode, 5 levels) ───────────────────────
+    # Deepest background → lightest raised element.
+    SURFACE_CANVAS = "#0D0F14"       # Level 0 — main canvas / deepest void
+    SURFACE_BASE = "#141720"         # Level 1 — toolbar, sidebar, status bar
+    SURFACE_RAISED = "#1C1F2E"       # Level 2 — cards, input fields
+    SURFACE_OVERLAY = "#252838"      # Level 3 — dropdowns, hover on raised
+    SURFACE_HOVER = "#2E3148"        # Level 4 — hover on overlay-level items
+
+    # ── Seal red (印泥红) — primary accent, used sparingly ───────────
     PRIMARY = "#C14443"
+    PRIMARY_HOVER = "#D45554"
     PRIMARY_DARK = "#9E2F2E"
     PRIMARY_LIGHT = "#E8A5A4"
     PRIMARY_PALE = "#F5F0E8"
 
-    # Ink black (墨黑) — backgrounds
-    BG_DARK = "#1A1A2E"
-    BG_CARD = "#2A2D3E"
+    # ── Text ──────────────────────────────────────────────────────────
+    TEXT_PRIMARY = "#F0EDE6"          # Main text — warm white
+    TEXT_SECONDARY = "#8B8FA3"        # Labels, descriptions
+    TEXT_TERTIARY = "#5C6070"         # Disabled, hints
+    TEXT_ON_DARK = "#E8E4DE"          # Legacy alias → TEXT_PRIMARY
 
-    # Text
-    TEXT_ON_DARK = "#E8E4DE"
-    TEXT_SECONDARY = "#8B8697"
+    # ── Decorative / semantic ─────────────────────────────────────────
+    GOLD = "#C9A96E"                  # Section headings, accent trim
+    BORDER_SUBTLE = "#1E2130"         # 1px dividers between sections
+    DANGER = "#ff6b6b"                # Delete / destructive actions
 
-    # Decorative
-    GOLD = "#C9A96E"
-    DANGER = "#ff6b6b"
-
-    # Selection
+    # ── Selection ────────────────────────────────────────────────────
     ACCENT_SELECTION = "#C14443"
+
+    # ── Legacy aliases (backward compat, will migrate gradually) ─────
+    BG_DARK = SURFACE_CANVAS
+    BG_CARD = SURFACE_RAISED
 
 
 # ── Typography ────────────────────────────────────────────────────────
@@ -62,28 +75,28 @@ _CJK_FONT = _detect_cjk_font()
 
 
 class Fonts:
-    """Application typography presets."""
+    """Application typography presets — 4px-aligned size scale."""
 
     FAMILY = _CJK_FONT
     HEADING_SIZE = 14
-    BODY_SIZE = 11
-    SMALL_SIZE = 9
+    BODY_SIZE = 12
+    SMALL_SIZE = 10
     SPLASH_TITLE_SIZE = 32
-    SPLASH_SUBTITLE_SIZE = 12
-    SPLASH_LOADING_SIZE = 11
+    SPLASH_SUBTITLE_SIZE = 13
+    SPLASH_LOADING_SIZE = 12
 
 
 # ── Spacing ───────────────────────────────────────────────────────────
 
 
 class Spacing:
-    """Spacing / padding presets (pixels)."""
+    """Spacing / padding presets — 4px grid system."""
 
-    PAD_XS = 2
-    PAD_SM = 5
-    PAD_MD = 10
-    PAD_LG = 15
-    PAD_XL = 20
+    PAD_XS = 4
+    PAD_SM = 8
+    PAD_MD = 12
+    PAD_LG = 16
+    PAD_XL = 24
 
 
 # ── Layout Constants ──────────────────────────────────────────────────
