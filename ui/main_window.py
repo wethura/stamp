@@ -128,6 +128,7 @@ class MainWindow(ctk.CTkFrame):
         )
         self.controls.grid(row=0, column=1, sticky="nsew")
         self.controls.on_instance_property_changed = self.controller.update_instance_property
+        self.controls.on_library_changed = self.controller.on_stamp_library_changed
 
         # Allow controls to detect drag-drop onto preview area
         self.controls._drop_target = self.preview.canvas

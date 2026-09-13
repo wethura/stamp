@@ -1,6 +1,7 @@
 """ControlsPanel 测试"""
 import unittest
 import tkinter as tk
+import customtkinter as ctk
 from unittest.mock import MagicMock, patch
 
 from ui.controls_panel import ControlsPanel
@@ -33,28 +34,17 @@ class TestDeleteButton(unittest.TestCase):
         stamp.get_image.return_value = img
         return stamp
 
-    # @dod delete-btn-visible v1.0
-    def test_delete_button_visible(self):
+    def test_cards_have_no_delete_button(self):
         stamp = self._create_mock_stamp("stamp1", "章A")
         self.mock_manager.list_stamps.return_value = [stamp]
         self.mock_manager.get_stamp.return_value = stamp
         self.panel._refresh_stamp_list()
         self.panel.update_idletasks()
 
-        children = self.panel._stamp_inner.winfo_children()
+        children = self.panel._scroll_frame.winfo_children()
         self.assertEqual(len(children), 1)
-
-        container = children[0]
-        container_children = container.winfo_children()
-
-        delete_btn = None
-        for w in container_children:
-            if isinstance(w, (tk.Button, tk.Label)) and w.cget("text") == "删除":
-                delete_btn = w
-                break
-
-        self.assertIsNotNone(delete_btn, "应存在 text='删除' 的按钮")
-        self.assertEqual(delete_btn.cget("fg"), "red")
+        self.assertFalse(any(isinstance(widget, (tk.Button, ctk.CTkButton))
+                             for widget in children[0].winfo_children()))
 
     # @dod delete-confirm-dialog v1.0
     @patch("ui.controls_panel.messagebox.askyesno")
@@ -67,11 +57,8 @@ class TestDeleteButton(unittest.TestCase):
 
         mock_askyesno.return_value = False
 
-        container = self.panel._stamp_inner.winfo_children()[0]
-        for w in container.winfo_children():
-            if isinstance(w, (tk.Button, tk.Label)) and w.cget("text") == "删除":
-                w.event_generate("<Button-1>")
-                break
+        self.assertFalse(self.panel._delete_stamp("stamp1"))
+        mock_askyesno.assert_called_once()
 
         self.mock_manager.delete_stamp.assert_not_called()
 

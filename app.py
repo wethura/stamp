@@ -103,6 +103,17 @@ class App:
 
     # --- Instance Management ---
 
+    def on_stamp_library_changed(self):
+        """Refresh template edits and remove placements of deleted templates."""
+        if self.instance_manager:
+            for instance in self.instance_manager.list_instances():
+                if self.stamp_manager.get_stamp(instance.template_id) is None:
+                    self.instance_manager.remove_instance(instance.instance_id)
+            if self._selected_instance_id and self.instance_manager.get_instance(self._selected_instance_id) is None:
+                self._selected_instance_id = None
+                self.window.controls.set_editing_instance(None)
+        self._refresh_preview()
+
     def create_instance_from_template(self, template_id: str):
         """Double-click template to create instance on current active page"""
         if self.instance_manager is None:

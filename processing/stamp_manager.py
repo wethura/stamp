@@ -2,6 +2,7 @@
 import json
 import base64
 import os
+import tempfile
 from dataclasses import dataclass, asdict
 from typing import List, Optional
 from datetime import datetime
@@ -54,8 +55,16 @@ class StampManager:
     def _save(self):
         """保存章数据到文件"""
         os.makedirs(self.config_dir, exist_ok=True)
-        with open(self.data_file, "w", encoding="utf-8") as f:
-            json.dump([asdict(s) for s in self._stamps], f, ensure_ascii=False, indent=2)
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                             dir=self.config_dir, delete=False) as f:
+                temporary_path = f.name
+                json.dump([asdict(s) for s in self._stamps], f, ensure_ascii=False, indent=2)
+            os.replace(temporary_path, self.data_file)
+        finally:
+            if temporary_path and os.path.exists(temporary_path):
+                os.unlink(temporary_path)
 
     def list_stamps(self) -> List[StampData]:
         """获取所有章"""
@@ -79,13 +88,26 @@ class StampManager:
         self._save()
         return stamp
 
-    def update_stamp(self, stamp_id: str, name: Optional[str] = None) -> Optional[StampData]:
+    def update_stamp(self, stamp_id: str, name: Optional[str] = None,
+                     image: Optional[Image.Image] = None) -> Optional[StampData]:
         """更新章模板信息"""
         for stamp in self._stamps:
             if stamp.id == stamp_id:
+                old_name, old_image = stamp.name, stamp.image_base64
+                encoded_image = None
+                if image is not None:
+                    buf = io.BytesIO()
+                    image.save(buf, format="PNG")
+                    encoded_image = base64.b64encode(buf.getvalue()).decode("utf-8")
                 if name is not None:
                     stamp.name = name
-                self._save()
+                if encoded_image is not None:
+                    stamp.image_base64 = encoded_image
+                try:
+                    self._save()
+                except Exception:
+                    stamp.name, stamp.image_base64 = old_name, old_image
+                    raise
                 return stamp
         return None
 
@@ -94,7 +116,11 @@ class StampManager:
         for i, stamp in enumerate(self._stamps):
             if stamp.id == stamp_id:
                 self._stamps.pop(i)
-                self._save()
+                try:
+                    self._save()
+                except Exception:
+                    self._stamps.insert(i, stamp)
+                    raise
                 return True
         return False
 

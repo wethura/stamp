@@ -9,13 +9,12 @@ from ui.theme import Colors, Fonts, Spacing
 
 
 class StampCard(ctk.CTkFrame):
-    """A single stamp template card with thumbnail, name, delete button, and drag support."""
+    """A single stamp template card with thumbnail, name, and drag support."""
 
     def __init__(self, stamp, parent=None,
                  on_double_click=None,
-                 on_delete_requested=None,
                  on_drag_start=None):
-        super().__init__(parent, width=108, height=180, corner_radius=10,
+        super().__init__(parent, width=108, height=132, corner_radius=10,
                          fg_color=Colors.SURFACE_RAISED,
                          border_width=1, border_color=Colors.SURFACE_OVERLAY)
         self.grid_propagate(False)
@@ -24,7 +23,6 @@ class StampCard(ctk.CTkFrame):
         self._stamp = stamp
         self._stamp_id = stamp.id
         self._on_double_click = on_double_click
-        self._on_delete_requested = on_delete_requested
         self._on_drag_start = on_drag_start
         self._drag_start_pos = None
 
@@ -42,6 +40,7 @@ class StampCard(ctk.CTkFrame):
         self._thumb_photo = ImageTk.PhotoImage(img)
 
         self._thumb_label = tk.Label(self, image=self._thumb_photo, bg=Colors.SURFACE_RAISED,
+                                     width=90, height=90, padx=0, pady=0,
                                      cursor="hand2", borderwidth=0)
         self._thumb_label.pack(pady=(Spacing.PAD_SM, Spacing.PAD_XS))
 
@@ -52,17 +51,9 @@ class StampCard(ctk.CTkFrame):
             self, text=display_name,
             font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
             text_color=Colors.TEXT_PRIMARY,
+            height=20,
         )
-        name_label.pack()
-
-        # Delete button
-        del_btn = ctk.CTkLabel(
-            self, text="✕ 删除",
-            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
-            text_color=Colors.TEXT_TERTIARY,
-            cursor="hand2",
-        )
-        del_btn.pack(fill="x", padx=Spacing.PAD_XS, pady=(0, Spacing.PAD_XS))
+        name_label.pack(pady=(0, Spacing.PAD_SM))
 
         # Bind interactions to all child widgets
         for widget in (self, self._thumb_label, name_label):
@@ -70,10 +61,6 @@ class StampCard(ctk.CTkFrame):
             widget.bind("<ButtonPress-1>", self._on_press)
             widget.bind("<B1-Motion>", self._on_motion)
             widget.bind("<ButtonRelease-1>", self._on_release)
-
-        del_btn.bind("<Button-1>", lambda e: self._delete())
-        del_btn.bind("<Enter>", lambda e: del_btn.configure(text_color=Colors.DANGER))
-        del_btn.bind("<Leave>", lambda e: del_btn.configure(text_color=Colors.TEXT_TERTIARY))
 
     @property
     def stamp_id(self) -> str:
@@ -109,7 +96,3 @@ class StampCard(ctk.CTkFrame):
 
     def _on_release(self, event):
         self._drag_start_pos = None
-
-    def _delete(self):
-        if self._on_delete_requested:
-            self._on_delete_requested(self._stamp_id)

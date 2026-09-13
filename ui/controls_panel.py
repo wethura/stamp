@@ -11,6 +11,7 @@ from processing.stamp import load_stamp
 from processing.stamp_manager import StampData
 from processing.stamp_instance import StampInstanceManager
 from ui.stamp_card import StampCard
+from ui.stamp_library_dialog import StampLibraryDialog
 from ui.theme import Colors, Fonts, Spacing, PANEL_WIDTH
 
 
@@ -47,6 +48,7 @@ class ControlsPanel(ctk.CTkScrollableFrame):
     """Right-side panel with stamp template library, instance editing sliders, and page navigation."""
 
     on_instance_property_changed = None
+    on_library_changed = None
 
     def __init__(self, parent,
                  on_create_instance=None):
@@ -119,8 +121,12 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         self._build_section_heading("01   印章库", row)
         row += 1
 
+        library_actions = ctk.CTkFrame(self, fg_color="transparent")
+        library_actions.grid(row=row, column=0, padx=Spacing.PAD_LG,
+                             pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
+        library_actions.grid_columnconfigure(0, weight=1)
         import_btn = ctk.CTkButton(
-            self,
+            library_actions,
             text="＋  导入印章",
             fg_color=Colors.SURFACE_RAISED,
             hover_color=Colors.SURFACE_OVERLAY,
@@ -131,11 +137,17 @@ class ControlsPanel(ctk.CTkScrollableFrame):
             corner_radius=6,
             command=self._import_stamp,
         )
-        import_btn.grid(row=row, column=0, padx=Spacing.PAD_LG, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
+        import_btn.grid(row=0, column=0, padx=(0, Spacing.PAD_SM), sticky="ew")
+        ctk.CTkButton(
+            library_actions, text="管理印章", width=88, height=40,
+            corner_radius=6, fg_color=Colors.SURFACE_RAISED,
+            hover_color=Colors.SURFACE_OVERLAY, text_color=Colors.TEXT_SECONDARY,
+            border_width=1, border_color=Colors.BORDER_SUBTLE,
+            font=(Fonts.FAMILY, Fonts.BODY_SIZE), command=self._manage_stamps,
+        ).grid(row=0, column=1)
         row += 1
 
-        # Scrollable stamp card grid — show one row at a time
-        # Space for a complete card row, including its actions.
+        # Keep the library viewport roomy so compact cards reveal more stamps.
         self._scroll_frame = StampListScrollFrame(
             self, on_wheel_overflow=self._on_stamp_list_wheel_overflow,
             fg_color="transparent", height=202,
@@ -315,6 +327,24 @@ class ControlsPanel(ctk.CTkScrollableFrame):
     #  Stamp Library
     # ═══════════════════════════════════════════════════════════════════
 
+    def _manage_stamps(self):
+        if self._stamp_manager is None:
+            return
+        dialog = getattr(self, "_library_dialog", None)
+        if dialog is not None and dialog.winfo_exists():
+            dialog.lift()
+            dialog.focus_force()
+            return
+        self._library_dialog = StampLibraryDialog(
+            self.winfo_toplevel(), self._stamp_manager,
+            on_changed=self._library_changed, on_delete=self._delete_stamp,
+        )
+
+    def _library_changed(self):
+        if self.on_library_changed:
+            self.on_library_changed()
+        self._refresh_stamp_list()
+
     def _import_stamp(self):
         path = filedialog.askopenfilename(
             title="选择章图片",
@@ -359,7 +389,6 @@ class ControlsPanel(ctk.CTkScrollableFrame):
             card = StampCard(
                 stamp, self._scroll_frame,
                 on_double_click=self._on_card_double_click,
-                on_delete_requested=self._delete_stamp,
                 on_drag_start=self._start_stamp_drag,
             )
             card.grid(row=row_idx, column=col_idx, padx=Spacing.PAD_XS, pady=Spacing.PAD_XS, sticky="nsew")
@@ -370,22 +399,30 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         if self.on_create_instance:
             self.on_create_instance(stamp_id)
 
-    def _delete_stamp(self, stamp_id: str):
+    def _delete_stamp(self, stamp_id: str, parent=None):
         if not self._stamp_manager:
             return
 
         stamp = self._stamp_manager.get_stamp(stamp_id)
         stamp_name = stamp.name if stamp else "该章"
 
-        if not messagebox.askyesno("确认删除", f"确定要删除「{stamp_name}」吗？"):
-            return
+        usage = 0
+        if self._instance_manager:
+            usage = sum(inst.template_id == stamp_id
+                        for inst in self._instance_manager.list_instances())
+        prompt = f"确定要删除「{stamp_name}」吗？此操作无法撤销。"
+        if usage:
+            prompt += f"\n\n当前文档中的 {usage} 处该印章也会移除。"
+        if not messagebox.askyesno("确认删除", prompt, parent=parent or self.winfo_toplevel()):
+            return False
 
         self._stamp_manager.delete_stamp(stamp_id)
         if self._editing_instance_id and self._instance_manager:
             inst = self._instance_manager.get_instance(self._editing_instance_id)
             if inst and inst.template_id == stamp_id:
                 self._editing_instance_id = None
-        self._refresh_stamp_list()
+        self._library_changed()
+        return True
 
     def _start_stamp_drag(self, event, template_id: str, thumb_img):
         """Start floating drag from stamp card."""
