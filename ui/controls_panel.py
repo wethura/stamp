@@ -1,5 +1,7 @@
 """Right-side controls panel — stamp library, instance editing, page navigation."""
 
+import sys
+
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Optional
 
@@ -10,6 +12,35 @@ from processing.stamp_manager import StampData
 from processing.stamp_instance import StampInstanceManager
 from ui.stamp_card import StampCard
 from ui.theme import Colors, Fonts, Spacing, PANEL_WIDTH
+
+
+class StampListScrollFrame(ctk.CTkScrollableFrame):
+    """Stamp card list that hands the wheel to the outer panel at scroll bounds.
+
+    CustomTkinter dispatches wheel events via bind_all, so a scrollable frame
+    nested inside another one would otherwise scroll both at the same time.
+    """
+
+    def __init__(self, master, on_wheel_overflow=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self._on_wheel_overflow = on_wheel_overflow
+
+    def _mouse_wheel_all(self, event):
+        if not self.check_if_master_is_canvas(event.widget):
+            return
+
+        if sys.platform.startswith("win"):
+            delta = -int(event.delta / 6)
+        else:
+            delta = -event.delta
+
+        top, bottom = self._parent_canvas.yview()
+        if (delta < 0 and top <= 0.0) or (delta > 0 and bottom >= 1.0):
+            if self._on_wheel_overflow:
+                self._on_wheel_overflow(event)
+            return
+
+        self._parent_canvas.yview("scroll", delta, "units")
 
 
 class ControlsPanel(ctk.CTkScrollableFrame):
@@ -37,6 +68,26 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         self._editing_instance_id: Optional[str] = None
 
         self._build_ui()
+
+    def _mouse_wheel_all(self, event):
+        """Skip wheel events that land inside the stamp list.
+
+        The list handles its own scrolling (including chaining to this panel
+        at its bounds); without this check both scroll areas would move at
+        once, since CustomTkinter dispatches wheel events globally.
+        """
+        inner = getattr(self, "_scroll_frame", None)
+        if inner is not None and self.check_if_master_is_canvas(event.widget):
+            if str(event.widget).startswith(str(inner._parent_canvas)):
+                return
+        super()._mouse_wheel_all(event)
+
+    def _on_stamp_list_wheel_overflow(self, event):
+        """Continue outer-panel scrolling when the stamp list hits a bound."""
+        if sys.platform.startswith("win"):
+            self._parent_canvas.yview("scroll", -int(event.delta / 6), "units")
+        else:
+            self._parent_canvas.yview("scroll", -event.delta, "units")
 
     # ═══════════════════════════════════════════════════════════════════
     #  Public API
@@ -85,8 +136,9 @@ class ControlsPanel(ctk.CTkScrollableFrame):
 
         # Scrollable stamp card grid — show one row at a time
         # Space for a complete card row, including its actions.
-        self._scroll_frame = ctk.CTkScrollableFrame(
-            self, fg_color="transparent", height=202,
+        self._scroll_frame = StampListScrollFrame(
+            self, on_wheel_overflow=self._on_stamp_list_wheel_overflow,
+            fg_color="transparent", height=202,
         )
         self._scroll_frame.grid(row=row, column=0, padx=Spacing.PAD_LG, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="nsew")
         self._scroll_frame.grid_columnconfigure((0, 1), weight=1)
@@ -244,6 +296,11 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         try:
             angle = float(text) % 360
         except ValueError:
+            # Invalid input: restore the instance's actual angle
+            inst = self._instance_manager.get_instance(self._editing_instance_id)
+            if inst is not None:
+                self._rotation_entry.delete(0, "end")
+                self._rotation_entry.insert(0, f"{inst.rotation:.0f}")
             return
         self._apply_rotation(angle)
 

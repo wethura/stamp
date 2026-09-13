@@ -95,6 +95,7 @@ class App:
             self._selected_instance_id = None
 
             self.window.controls.set_instance_manager(self.instance_manager)
+            self.window.preview.reset_view()
             self.window.set_status(f"已加载: {path}  ({len(self.pages)} 页)")
             self._refresh_preview()
         except Exception as e:

@@ -80,9 +80,35 @@ class MainWindow(ctk.CTkFrame):
         ctk.CTkLabel(preview_header, text="文档预览",
                      font=(Fonts.FAMILY, Fonts.HEADING_SIZE, "bold"),
                      text_color=Colors.TEXT_PRIMARY).pack(side="left")
-        ctk.CTkLabel(preview_header, text="拖动印章调整位置 · 滚动查看页面",
-                     font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
-                     text_color=Colors.TEXT_SECONDARY).pack(side="right")
+
+        # Page navigation — keeps the active page visible in continuous
+        # scroll mode, and lets the user step page by page.
+        page_nav = ctk.CTkFrame(preview_header, fg_color="transparent")
+        page_nav.pack(side="right")
+        self._prev_page_btn = ctk.CTkButton(
+            page_nav, text="◀", width=28, height=26,
+            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE), corner_radius=6,
+            state="disabled",
+            command=lambda: self.preview.scroll_to_page(self.preview.get_active_page() - 1),
+        )
+        self._prev_page_btn.pack(side="left", padx=(0, Spacing.PAD_XS))
+        self._page_label = ctk.CTkLabel(
+            page_nav, text="第 – / – 页", width=90,
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+            text_color=Colors.TEXT_SECONDARY,
+        )
+        self._page_label.pack(side="left")
+        self._next_page_btn = ctk.CTkButton(
+            page_nav, text="▶", width=28, height=26,
+            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE), corner_radius=6,
+            state="disabled",
+            command=lambda: self.preview.scroll_to_page(self.preview.get_active_page() + 1),
+        )
+        self._next_page_btn.pack(side="left", padx=(Spacing.PAD_XS, 0))
 
         self.preview = PreviewCanvas(
             workspace,
@@ -90,7 +116,8 @@ class MainWindow(ctk.CTkFrame):
             on_delete_instance=self.controller.delete_instance,
             on_instance_selected=self.controller.on_instance_selected,
             on_drag_end=self.controller.on_instance_drag_end,
-            on_active_page_changed=self.controller.on_active_page_changed,
+            on_active_page_changed=self._on_preview_page_changed,
+            on_page_count_changed=self._update_page_nav,
         )
         self.preview.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
@@ -122,6 +149,23 @@ class MainWindow(ctk.CTkFrame):
             anchor="w",
         )
         self._status_label.pack(side="left", padx=Spacing.PAD_MD, fill="x", expand=True)
+
+    def _on_preview_page_changed(self, page_index: int):
+        self.controller.on_active_page_changed(page_index)
+        self._update_page_nav()
+
+    def _update_page_nav(self, *_):
+        total = self.preview.page_count
+        if total <= 0:
+            self._page_label.configure(text="第 – / – 页")
+            self._prev_page_btn.configure(state="disabled")
+            self._next_page_btn.configure(state="disabled")
+            return
+
+        current = min(self.preview.get_active_page(), total - 1)
+        self._page_label.configure(text=f"第 {current + 1} / {total} 页")
+        self._prev_page_btn.configure(state="normal" if current > 0 else "disabled")
+        self._next_page_btn.configure(state="normal" if current < total - 1 else "disabled")
 
     def set_status(self, message: str):
         self._status_label.configure(text=message)

@@ -59,7 +59,8 @@ class PreviewCanvas(ctk.CTkFrame):
                  on_delete_instance=None,
                  on_instance_selected=None,
                  on_drag_end=None,
-                 on_active_page_changed=None):
+                 on_active_page_changed=None,
+                 on_page_count_changed=None):
         super().__init__(parent, fg_color=Colors.SURFACE_CANVAS)
 
         self.on_stamp_position_changed = on_stamp_position_changed
@@ -67,6 +68,7 @@ class PreviewCanvas(ctk.CTkFrame):
         self.on_instance_selected = on_instance_selected
         self.on_drag_end = on_drag_end
         self.on_active_page_changed = on_active_page_changed
+        self.on_page_count_changed = on_page_count_changed
 
         # Scrollbar
         self._scrollbar = ctk.CTkScrollbar(
@@ -78,13 +80,16 @@ class PreviewCanvas(ctk.CTkFrame):
         )
         self._scrollbar.pack(side="right", fill="y")
 
-        # Inner canvas
+        # Inner canvas. yscrollincrement=1 makes yview_scroll("units") move
+        # by single pixels, so wheel scrolling is smooth instead of jumping
+        # in 1/10-window chunks.
         self.canvas = tk.Canvas(
             self, bg=Colors.SURFACE_CANVAS, highlightthickness=0, cursor="crosshair",
+            yscrollincrement=1,
             yscrollcommand=self._scrollbar.set,
         )
         self.canvas.pack(side="left", fill="both", expand=True)
-        self._scrollbar.configure(command=self.canvas.yview)
+        self._scrollbar.configure(command=self._on_scrollbar_move)
 
         # State
         self._pages: List[Image.Image] = []
@@ -112,15 +117,27 @@ class PreviewCanvas(ctk.CTkFrame):
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Configure>", self._on_resize)
 
-        # Mouse wheel scrolling
-        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        # Mouse wheel scrolling — bind on the frame and scrollbar too, so the
+        # wheel works anywhere over the preview area, not just over the page.
+        for widget in (self, self.canvas, self._scrollbar):
+            widget.bind("<MouseWheel>", self._on_mousewheel)
         if sys.platform == "linux":
-            self.canvas.bind("<Button-4>", lambda e: self.canvas.yview_scroll(-3, "units"))
-            self.canvas.bind("<Button-5>", lambda e: self.canvas.yview_scroll(3, "units"))
+            for widget in (self, self.canvas, self._scrollbar):
+                widget.bind("<Button-4>", lambda e: self._scroll_pixels(-48))
+                widget.bind("<Button-5>", lambda e: self._scroll_pixels(48))
 
-        # Keyboard delete
+        # Keyboard: Delete removes selection; arrows nudge the selected stamp
+        # (or scroll when nothing is selected); PgUp/PgDn/Home/End navigate pages.
         self.canvas.bind("<BackSpace>", self._on_backspace)
         self.canvas.bind("<Delete>", self._on_backspace)
+        self.canvas.bind("<Up>", lambda e: self._on_arrow_key(0, -1))
+        self.canvas.bind("<Down>", lambda e: self._on_arrow_key(0, 1))
+        self.canvas.bind("<Left>", lambda e: self._on_arrow_key(-1, 0))
+        self.canvas.bind("<Right>", lambda e: self._on_arrow_key(1, 0))
+        self.canvas.bind("<Prior>", lambda e: self.scroll_to_page(self._active_page - 1))
+        self.canvas.bind("<Next>", lambda e: self.scroll_to_page(self._active_page + 1))
+        self.canvas.bind("<Home>", lambda e: self.scroll_to_page(0))
+        self.canvas.bind("<End>", lambda e: self.scroll_to_page(self.page_count - 1))
 
         # Context menu
         self.canvas.bind("<Button-2>", self._on_right_click)
@@ -152,6 +169,33 @@ class PreviewCanvas(ctk.CTkFrame):
     def get_active_page(self) -> int:
         """Return the current active page index based on scroll position."""
         return self._active_page
+
+    @property
+    def page_count(self) -> int:
+        """Number of pages currently shown in the preview."""
+        return len(self._pages)
+
+    def scroll_to_page(self, page_index: int):
+        """Scroll the view so the given page is at the top of the viewport."""
+        if not self._page_offsets:
+            return
+        idx = max(0, min(len(self._page_offsets) - 1, int(page_index)))
+        top_offset = self._page_offsets[idx]
+        total = self._page_offsets[-1] + self._page_display_sizes[-1][1]
+        if total <= 0:
+            return
+        self.canvas.yview_moveto(top_offset / total)
+        self._update_active_page()
+
+    def reset_view(self):
+        """Return to the first page (used when a new document is loaded).
+
+        Goes through _update_active_page so the change is announced to
+        listeners (page indicator, controller).
+        """
+        if self._pages:
+            self.canvas.yview_moveto(0)
+        self._update_active_page()
 
     # ── Rendering ────────────────────────────────────────────────────
 
@@ -234,6 +278,12 @@ class PreviewCanvas(ctk.CTkFrame):
 
         # Notify active page
         self._update_active_page()
+
+        # Notify page count so the page indicator can refresh
+        if getattr(self, "_last_page_count", None) != len(self._pages):
+            self._last_page_count = len(self._pages)
+            if self.on_page_count_changed:
+                self.on_page_count_changed(len(self._pages))
 
     def _render_placeholder(self):
         """Draw hint text when no document is loaded."""
@@ -397,6 +447,7 @@ class PreviewCanvas(ctk.CTkFrame):
     # ── Interaction ──────────────────────────────────────────────────
 
     def _on_press(self, event):
+        self.canvas.focus_set()
         if not self._has_document:
             return
 
@@ -480,11 +531,49 @@ class PreviewCanvas(ctk.CTkFrame):
             self._render_placeholder()
 
     def _on_mousewheel(self, event):
-        if sys.platform == "darwin":
-            self.canvas.yview_scroll(int(-event.delta / 4), "units")
-        else:
-            self.canvas.yview_scroll(max(-3, min(3, int(-event.delta / 120))), "units")
+        self._scroll_pixels(self._wheel_pixels(event.delta))
+
+    @staticmethod
+    def _wheel_pixels(delta: float) -> int:
+        """Convert a platform wheel delta into a pixel scroll amount.
+
+        macOS trackpads emit many small deltas (1-10); Windows mice emit
+        multiples of 120 per notch. Clamp to keep momentum bursts sane.
+        """
+        if sys.platform.startswith("win"):
+            return max(-240, min(240, int(-delta * 0.6)))
+        return max(-240, min(240, int(-delta * 4)))
+
+    def _scroll_pixels(self, amount: int):
+        if amount:
+            self.canvas.yview_scroll(amount, "units")
         self._update_active_page()
+
+    def _on_scrollbar_move(self, *args):
+        self.canvas.yview(*args)
+        self._update_active_page()
+
+    # ── Keyboard ─────────────────────────────────────────────────────
+
+    def _on_arrow_key(self, dx, dy):
+        if self._has_document and self._nudge_selected(dx * 0.005, dy * 0.005):
+            return "break"
+        self._scroll_pixels(dy * 60)
+        return "break"
+
+    def _nudge_selected(self, dx, dy) -> bool:
+        """Move the selected stamp by (dx, dy) in page ratios. True if handled."""
+        if not self._selected_instance_id:
+            return False
+        for instances in self._all_instances.values():
+            for inst in instances:
+                if inst.instance_id == self._selected_instance_id:
+                    new_x = min(1.0, max(0.0, inst.pos_x + dx))
+                    new_y = min(1.0, max(0.0, inst.pos_y + dy))
+                    if self.on_stamp_position_changed:
+                        self.on_stamp_position_changed(inst.instance_id, new_x, new_y)
+                    return True
+        return False
 
     def _on_backspace(self, event):
         self._delete_selected()
