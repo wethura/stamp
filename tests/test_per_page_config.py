@@ -33,6 +33,7 @@ class TestAppInstanceIntegration(unittest.TestCase):
         app.stamp_manager = StampManager(config_dir=self.temp_dir)
         app.instance_manager = None
         app.selected_pages = set()
+        app.active_page = 0
         app.current_preview_page = 0
         app._selected_instance_id = None
         app.window = MagicMock()
@@ -54,6 +55,7 @@ class TestAppInstanceIntegration(unittest.TestCase):
         app.doc_path = self.doc_path
         app.pages = [Image.new("RGB", (800, 600)) for _ in range(3)]
         app.instance_manager = StampInstanceManager()
+        app.active_page = 1
         app.current_preview_page = 1
         app.selected_pages = {0, 1, 2}
 

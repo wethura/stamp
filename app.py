@@ -24,7 +24,7 @@ class App:
         self.stamp_manager = StampManager()
         self.instance_manager: Optional[StampInstanceManager] = None
 
-        self.current_preview_page = 0
+        self.active_page = 0
         self._selected_instance_id: Optional[str] = None
 
         self.window = None
@@ -91,10 +91,9 @@ class App:
                 self.pages.append(handler.render_page(i))
 
             self.instance_manager = StampInstanceManager(path)
-            self.current_preview_page = 0
+            self.active_page = 0
             self._selected_instance_id = None
 
-            self.window.controls.set_pages(len(self.pages))
             self.window.controls.set_instance_manager(self.instance_manager)
             self.window.set_status(f"已加载: {path}  ({len(self.pages)} 页)")
             self._refresh_preview()
@@ -104,11 +103,12 @@ class App:
     # --- Instance Management ---
 
     def create_instance_from_template(self, template_id: str):
-        """Double-click template to create instance on current page"""
+        """Double-click template to create instance on current active page"""
         if self.instance_manager is None:
             return
 
-        instance = self.instance_manager.add_instance(template_id, self.current_preview_page)
+        page_index = self.active_page
+        instance = self.instance_manager.add_instance(template_id, page_index)
         self._selected_instance_id = instance.instance_id
         self.window.controls.set_editing_instance(instance.instance_id)
         self._refresh_preview()
@@ -147,13 +147,9 @@ class App:
         self.instance_manager.update_instance(instance_id, **kwargs)
         self._refresh_preview()
 
-    # --- Page Navigation ---
-
-    def on_preview_page_change(self, idx: int):
-        self.current_preview_page = idx
-        self._selected_instance_id = None
-        self.window.controls.set_editing_instance(None)
-        self._refresh_preview()
+    def on_active_page_changed(self, page_index: int):
+        """Active page changed from preview canvas scroll/click"""
+        self.active_page = page_index
 
     # --- Preview Data ---
 
@@ -203,12 +199,7 @@ class App:
             messagebox.showerror("导出失败", str(e))
 
     def _export_with_instances(self, output_path: str):
-        """Export with all instances applied per-page.
-
-        Strategy: export instances one-by-one. The first instance uses the
-        original handler; subsequent instances re-load the accumulating output
-        via a temp PDF, stacking stamps incrementally.
-        """
+        """Export with all instances applied per-page."""
         all_instances = self.instance_manager.list_instances()
         page_instances: Dict[int, List[StampInstance]] = {}
         for inst in all_instances:
@@ -217,7 +208,6 @@ class App:
         if not page_instances:
             return
 
-        # Flatten all instances into a single ordered list
         ordered = []
         for page_idx in sorted(page_instances.keys()):
             ordered.extend(page_instances[page_idx])
@@ -264,15 +254,17 @@ class App:
     def _refresh_preview(self):
         if not self.pages:
             return
-        idx = min(self.current_preview_page, len(self.pages) - 1)
-        page_img = self.pages[idx]
 
-        instances = self.get_page_stamp_data(idx)
+        all_instances = {}
         template_images = {}
-        for inst in instances:
-            if inst.template_id not in template_images:
-                img = self.get_template_image(inst.template_id)
-                if img:
-                    template_images[inst.template_id] = img
+        for i in range(len(self.pages)):
+            instances = self.get_page_stamp_data(i)
+            if instances:
+                all_instances[i] = instances
+                for inst in instances:
+                    if inst.template_id not in template_images:
+                        img = self.get_template_image(inst.template_id)
+                        if img:
+                            template_images[inst.template_id] = img
 
-        self.window.preview.update_preview(page_img, instances, template_images)
+        self.window.preview.update_all_pages(self.pages, all_instances, template_images)

@@ -15,7 +15,7 @@ class StampCard(ctk.CTkFrame):
                  on_double_click=None,
                  on_delete_requested=None,
                  on_drag_start=None):
-        super().__init__(parent, width=108, height=156, corner_radius=8,
+        super().__init__(parent, width=108, height=180, corner_radius=10,
                          fg_color=Colors.SURFACE_RAISED,
                          border_width=1, border_color=Colors.SURFACE_OVERLAY)
         self.grid_propagate(False)
@@ -36,7 +36,7 @@ class StampCard(ctk.CTkFrame):
 
     def _build_ui(self):
         # Thumbnail — use tk.Label with PhotoImage (reliable across platforms)
-        img = self._stamp.get_image()
+        img = self._stamp.get_image().copy()
         img.thumbnail((90, 90))
         self._thumb_pil = img
         self._thumb_photo = ImageTk.PhotoImage(img)

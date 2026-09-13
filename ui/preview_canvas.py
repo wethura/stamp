@@ -1,7 +1,8 @@
-"""Document preview canvas — CTkFrame wrapping tk.Canvas for page display and stamp interaction."""
+"""Document preview canvas — continuous scroll mode with multi-page display and stamp interaction."""
 
+import sys
 import tkinter as tk
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 
 from PIL import Image, ImageTk
 
@@ -10,6 +11,8 @@ import customtkinter as ctk
 from processing.stamp import apply_opacity, apply_rotation
 from processing.stamp_instance import StampInstance
 from ui.theme import Colors, Fonts
+
+PAGE_GAP = 12
 
 
 def build_instance_display_data(
@@ -49,46 +52,71 @@ def build_instance_display_data(
 
 
 class PreviewCanvas(ctk.CTkFrame):
-    """Document preview with interactive stamp overlays using tkinter Canvas."""
+    """Document preview with continuous scroll and interactive stamp overlays."""
 
     def __init__(self, parent,
                  on_stamp_position_changed=None,
                  on_delete_instance=None,
                  on_instance_selected=None,
-                 on_drag_end=None):
+                 on_drag_end=None,
+                 on_active_page_changed=None):
         super().__init__(parent, fg_color=Colors.SURFACE_CANVAS)
 
         self.on_stamp_position_changed = on_stamp_position_changed
         self.on_delete_instance = on_delete_instance
         self.on_instance_selected = on_instance_selected
         self.on_drag_end = on_drag_end
+        self.on_active_page_changed = on_active_page_changed
+
+        # Scrollbar
+        self._scrollbar = ctk.CTkScrollbar(
+            self, orientation="vertical",
+            fg_color=Colors.SURFACE_CANVAS,
+            button_color=Colors.SURFACE_OVERLAY,
+            button_hover_color=Colors.SURFACE_HOVER,
+            width=14,
+        )
+        self._scrollbar.pack(side="right", fill="y")
 
         # Inner canvas
-        self.canvas = tk.Canvas(self, bg=Colors.SURFACE_CANVAS, highlightthickness=0, cursor="crosshair")
-        self.canvas.pack(fill="both", expand=True)
+        self.canvas = tk.Canvas(
+            self, bg=Colors.SURFACE_CANVAS, highlightthickness=0, cursor="crosshair",
+            yscrollcommand=self._scrollbar.set,
+        )
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self._scrollbar.configure(command=self.canvas.yview)
 
         # State
-        self._photo = None
-        self._preview_size = (800, 600)
-        self._offset = (0, 0)
-
-        self._last_page_img = None
-        self._last_instances: List[StampInstance] = []
+        self._pages: List[Image.Image] = []
+        self._all_instances: Dict[int, List[StampInstance]] = {}
         self._template_images: Dict[str, Image.Image] = {}
-        self._display_data: List[tuple] = []
+
+        # Computed layout per page
+        self._page_offsets: List[int] = []
+        self._page_display_sizes: List[Tuple[int, int]] = []
+        self._page_photos: List[Optional[ImageTk.PhotoImage]] = []
+        self._page_display_data: Dict[int, List[tuple]] = {}
 
         self._selected_instance_id: Optional[str] = None
-        self._drag_start = None
+        self._drag_start: Optional[Tuple[float, float]] = None
         self._dragging_instance_id: Optional[str] = None
-        self._drag_start_pos = (0, 0)
+        self._drag_start_pos: Tuple[float, float] = (0.0, 0.0)
+        self._drag_page_index: int = 0
 
         self._has_document = False
+        self._active_page = 0
 
         # Canvas event bindings
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Configure>", self._on_resize)
+
+        # Mouse wheel scrolling
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        if sys.platform == "linux":
+            self.canvas.bind("<Button-4>", lambda e: self.canvas.yview_scroll(-3, "units"))
+            self.canvas.bind("<Button-5>", lambda e: self.canvas.yview_scroll(3, "units"))
 
         # Keyboard delete
         self.canvas.bind("<BackSpace>", self._on_backspace)
@@ -109,22 +137,26 @@ class PreviewCanvas(ctk.CTkFrame):
 
     # ── Public API ───────────────────────────────────────────────────
 
-    def update_preview(self, page_img: Image.Image, instances: List[StampInstance],
-                       template_images: Dict[str, Image.Image]):
-        """Refresh the preview with a new page image and stamp instances."""
-        if page_img is None:
+    def update_all_pages(self, pages: List[Image.Image],
+                         all_instances: Dict[int, List[StampInstance]],
+                         template_images: Dict[str, Image.Image]):
+        """Refresh the preview with all pages and stamp instances."""
+        if not pages:
             return
         self._has_document = True
-        self._last_page_img = page_img
-        self._last_instances = instances if instances else []
+        self._pages = pages
+        self._all_instances = all_instances if all_instances else {}
         self._template_images = template_images if template_images else {}
         self._render()
+
+    def get_active_page(self) -> int:
+        """Return the current active page index based on scroll position."""
+        return self._active_page
 
     # ── Rendering ────────────────────────────────────────────────────
 
     def _render(self):
-        page_img = self._last_page_img
-        if page_img is None:
+        if not self._pages:
             return
 
         canvas_w = self.canvas.winfo_width()
@@ -132,53 +164,76 @@ class PreviewCanvas(ctk.CTkFrame):
         if canvas_w < 2 or canvas_h < 2:
             return
 
-        pw, ph = page_img.size
-        scale = min(canvas_w / pw, canvas_h / ph)
-        disp_w = max(1, int(pw * scale))
-        disp_h = max(1, int(ph * scale))
-        self._preview_size = (disp_w, disp_h)
+        # Compute layout for all pages (fit-to-width)
+        self._page_offsets = []
+        self._page_display_sizes = []
+        self._page_photos = []
+        self._page_display_data = {}
 
-        page_disp = page_img.resize((disp_w, disp_h), Image.LANCZOS).convert("RGBA")
+        y_offset = 0
+        for i, page_img in enumerate(self._pages):
+            pw, ph = page_img.size
+            scale = canvas_w / pw
+            disp_w = canvas_w
+            disp_h = max(1, int(ph * scale))
 
-        # Render stamp instances onto page
-        self._display_data = []
-        for inst in self._last_instances:
-            img = self._template_images.get(inst.template_id)
-            if img is None:
-                self._display_data.append(None)
-                continue
+            self._page_offsets.append(y_offset)
+            self._page_display_sizes.append((disp_w, disp_h))
 
-            img = img.copy()
+            y_offset += disp_h + PAGE_GAP
 
-            # Scale first (based on original dimensions), then rotate
-            stamp_w = max(1, int(disp_w * inst.size_ratio))
-            stamp_h = max(1, int(img.height * stamp_w / img.width))
-            img = img.resize((stamp_w, stamp_h), Image.LANCZOS)
+        total_height = y_offset - PAGE_GAP if self._pages else 0
 
-            if inst.opacity < 1.0:
-                img = apply_opacity(img, inst.opacity)
-            if inst.rotation != 0:
-                img = apply_rotation(img, inst.rotation)
+        # Render each page with stamps composited
+        for i, page_img in enumerate(self._pages):
+            disp_w, disp_h = self._page_display_sizes[i]
+            page_disp = page_img.resize((disp_w, disp_h), Image.LANCZOS).convert("RGBA")
 
-            x = int(inst.pos_x * disp_w)
-            y = int(inst.pos_y * disp_h)
-            x = min(max(0, x), disp_w - stamp_w)
-            y = min(max(0, y), disp_h - stamp_h)
+            instances = self._all_instances.get(i, [])
+            page_display = []
+            for inst in instances:
+                img = self._template_images.get(inst.template_id)
+                if img is None:
+                    page_display.append(None)
+                    continue
 
-            page_disp.paste(img, (x, y), mask=img)
-            self._display_data.append((stamp_w, stamp_h, x, y, inst.instance_id))
+                img = img.copy()
+                stamp_w = max(1, int(disp_w * inst.size_ratio))
+                stamp_h = max(1, int(img.height * stamp_w / img.width))
+                img = img.resize((stamp_w, stamp_h), Image.LANCZOS)
 
-        offset_x = (canvas_w - disp_w) // 2
-        offset_y = (canvas_h - disp_h) // 2
-        self._offset = (offset_x, offset_y)
+                if inst.opacity < 1.0:
+                    img = apply_opacity(img, inst.opacity)
+                if inst.rotation != 0:
+                    img = apply_rotation(img, inst.rotation)
 
-        self._photo = ImageTk.PhotoImage(page_disp.convert("RGB"))
+                x = int(inst.pos_x * disp_w)
+                y = int(inst.pos_y * disp_h)
+                x = min(max(0, x), disp_w - stamp_w)
+                y = min(max(0, y), disp_h - stamp_h)
+
+                page_disp.paste(img, (x, y), mask=img)
+                page_display.append((stamp_w, stamp_h, x, y, inst.instance_id))
+
+            self._page_display_data[i] = page_display
+            photo = ImageTk.PhotoImage(page_disp.convert("RGB"))
+            self._page_photos.append(photo)
+
+        # Draw to canvas
         self.canvas.delete("all")
-        self.canvas.create_image(offset_x, offset_y, anchor=tk.NW, image=self._photo)
+        for i, photo in enumerate(self._page_photos):
+            if photo is None:
+                continue
+            self.canvas.create_image(0, self._page_offsets[i], anchor=tk.NW, image=photo)
 
-        # Draw selection border for selected instance
+        self.canvas.configure(scrollregion=(0, 0, canvas_w, total_height))
+
+        # Draw selection border
         if self._selected_instance_id:
             self._draw_selection_border()
+
+        # Notify active page
+        self._update_active_page()
 
     def _render_placeholder(self):
         """Draw hint text when no document is loaded."""
@@ -188,69 +243,152 @@ class PreviewCanvas(ctk.CTkFrame):
             return
 
         self.canvas.delete("all")
-        self._photo = None
-
         cx = canvas_w // 2
         cy = canvas_h // 2
 
-        # Subtle dashed border
+        # A paper sheet and seal drawn with vectors stay crisp at any DPI.
+        compact = canvas_h < 420
+        top = cy - (105 if compact else 145)
         self.canvas.create_rectangle(
-            100, 80, canvas_w - 100, canvas_h - 80,
-            outline=Colors.SURFACE_OVERLAY, width=1, dash=(6, 4)
+            cx - 38, top + 5, cx + 46, top + 109,
+            fill=Colors.BORDER_SUBTLE, outline="",
         )
-
-        # Main hint
+        self.canvas.create_rectangle(
+            cx - 44, top, cx + 40, top + 104,
+            fill=Colors.SURFACE_BASE, outline=Colors.BORDER_SUBTLE,
+        )
+        for line in range(3):
+            self.canvas.create_line(
+                cx - 26, top + 27 + line * 14, cx + 19, top + 27 + line * 14,
+                fill=Colors.BORDER_SUBTLE, width=2,
+            )
+        self.canvas.create_oval(
+            cx + 5, top + 66, cx + 51, top + 112,
+            fill=Colors.SURFACE_BASE, outline=Colors.PRIMARY, width=2,
+        )
+        self.canvas.create_text(cx + 28, top + 89, text="印",
+                                fill=Colors.PRIMARY, font=(Fonts.FAMILY, 20, "bold"))
+        title_y = top + 146
         self.canvas.create_text(
-            cx, cy - 15,
-            text="打开文档或拖放文件到此处",
-            fill=Colors.TEXT_SECONDARY,
-            font=(Fonts.FAMILY, 14),
+            cx, title_y, text="为文档盖上一枚好印章",
+            fill=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, 22, "bold"),
+            width=max(180, canvas_w - 32), justify="center",
         )
-
-        # Secondary hint
         self.canvas.create_text(
-            cx, cy + 15,
-            text="支持 PDF · 图片 · Excel",
-            fill=Colors.TEXT_TERTIARY,
-            font=(Fonts.FAMILY, Fonts.BODY_SIZE),
+            cx, title_y + 39, text="从打开一份文档开始，也可以将文件拖到这里",
+            fill=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.BODY_SIZE),
+            width=max(180, canvas_w - 40), justify="center",
         )
+        self.canvas.create_text(
+            cx, title_y + 76, text="PDF   /   图片   /   Excel",
+            fill=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+        )
+        if not compact:
+            self.canvas.create_line(cx - 140, title_y + 116, cx + 140, title_y + 116,
+                                    fill=Colors.BORDER_SUBTLE)
+            self.canvas.create_text(
+                cx, title_y + 145, text="01  打开文档     02  添加印章     03  导出保存",
+                fill=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+            )
 
     def _draw_selection_border(self):
-        for data in self._display_data:
-            if data is None:
-                continue
-            sw, sh, x, y, inst_id = data
-            if inst_id == self._selected_instance_id:
-                ox, oy = self._offset
-                self.canvas.create_rectangle(
-                    ox + x - 3, oy + y - 3,
-                    ox + x + sw + 3, oy + y + sh + 3,
-                    outline=Colors.ACCENT_SELECTION, width=2
-                )
+        for page_idx, display_list in self._page_display_data.items():
+            for data in display_list:
+                if data is None:
+                    continue
+                sw, sh, x, y, inst_id = data
+                if inst_id == self._selected_instance_id:
+                    oy = self._page_offsets[page_idx]
+                    self.canvas.create_rectangle(
+                        x - 3, oy + y - 3,
+                        x + sw + 3, oy + y + sh + 3,
+                        outline=Colors.ACCENT_SELECTION, width=2,
+                    )
+                    return
+
+    # ── Active Page Tracking ─────────────────────────────────────────
+
+    def _update_active_page(self):
+        """Determine the active page from the middle of the visible area."""
+        if not self._page_offsets:
+            return
+
+        try:
+            view = self.canvas.yview()
+        except tk.TclError:
+            return
+
+        canvas_h = self.canvas.winfo_height()
+        if canvas_h < 2:
+            return
+
+        # Get the scrollregion height
+        scrollregion = self.canvas.cget("scrollregion")
+        if scrollregion:
+            total_height = float(scrollregion.split()[-1])
+        else:
+            return
+
+        visible_top = view[0] * total_height
+        visible_middle = visible_top + canvas_h / 2
+
+        # Find which page the middle of the visible area falls on
+        new_active = 0
+        for i in range(len(self._page_offsets)):
+            offset = self._page_offsets[i]
+            _, disp_h = self._page_display_sizes[i]
+            page_bottom = offset + disp_h
+            if visible_middle >= offset and visible_middle < page_bottom:
+                new_active = i
                 break
+            if i == len(self._page_offsets) - 1:
+                new_active = i
+
+        if new_active != self._active_page:
+            self._active_page = new_active
+            if self.on_active_page_changed:
+                self.on_active_page_changed(new_active)
 
     # ── Coordinate Conversion ────────────────────────────────────────
 
-    def _canvas_to_ratio(self, cx: int, cy: int) -> tuple:
-        ox, oy = self._offset
-        dw, dh = self._preview_size
-        px = cx - ox
-        py = cy - oy
-        ratio_x = px / dw if dw > 0 else 0
-        ratio_y = py / dh if dh > 0 else 0
-        return (ratio_x, ratio_y)
+    def _canvas_to_page_ratio(self, event_x: int, event_y: int) -> Tuple[int, float, float]:
+        """Convert canvas event coordinates to (page_index, ratio_x, ratio_y).
 
-    def _find_instance_at(self, ratio_x: float, ratio_y: float) -> Optional[str]:
-        dw, dh = self._preview_size
-        for data in self._display_data:
+        Returns (-1, 0, 0) if the click is not on any page.
+        """
+        canvas_x = self.canvas.canvasx(event_x)
+        canvas_y = self.canvas.canvasy(event_y)
+
+        for i in range(len(self._page_offsets)):
+            offset = self._page_offsets[i]
+            disp_w, disp_h = self._page_display_sizes[i]
+            page_bottom = offset + disp_h
+
+            if canvas_y >= offset and canvas_y < page_bottom:
+                local_x = canvas_x
+                local_y = canvas_y - offset
+                ratio_x = local_x / disp_w if disp_w > 0 else 0
+                ratio_y = local_y / disp_h if disp_h > 0 else 0
+                return (i, ratio_x, ratio_y)
+
+        return (-1, 0.0, 0.0)
+
+    def _find_instance_at(self, page_index: int, ratio_x: float, ratio_y: float) -> Optional[str]:
+        if page_index < 0:
+            return None
+        display_list = self._page_display_data.get(page_index, [])
+        _, disp_h = self._page_display_sizes[page_index]
+        disp_w, _ = self._page_display_sizes[page_index]
+
+        for data in display_list:
             if data is None:
                 continue
             sw, sh, px, py, inst_id = data
 
-            x1 = px / dw
-            y1 = py / dh
-            x2 = x1 + (sw / dw)
-            y2 = y1 + (sh / dh)
+            x1 = px / disp_w
+            y1 = py / disp_h
+            x2 = x1 + (sw / disp_w)
+            y2 = y1 + (sh / disp_h)
 
             if x1 <= ratio_x <= x2 and y1 <= ratio_y <= y2:
                 return inst_id
@@ -259,11 +397,25 @@ class PreviewCanvas(ctk.CTkFrame):
     # ── Interaction ──────────────────────────────────────────────────
 
     def _on_press(self, event):
-        if not self._last_instances:
+        if not self._has_document:
             return
 
-        ratio_x, ratio_y = self._canvas_to_ratio(event.x, event.y)
-        inst_id = self._find_instance_at(ratio_x, ratio_y)
+        page_idx, ratio_x, ratio_y = self._canvas_to_page_ratio(event.x, event.y)
+
+        # Update active page on click
+        if page_idx >= 0 and page_idx != self._active_page:
+            self._active_page = page_idx
+            if self.on_active_page_changed:
+                self.on_active_page_changed(page_idx)
+
+        instances = self._all_instances.get(page_idx, [])
+        if not instances:
+            self._selected_instance_id = None
+            if self.on_instance_selected:
+                self.on_instance_selected(None)
+            return
+
+        inst_id = self._find_instance_at(page_idx, ratio_x, ratio_y)
 
         if inst_id:
             self._selected_instance_id = inst_id
@@ -271,8 +423,9 @@ class PreviewCanvas(ctk.CTkFrame):
                 self.on_instance_selected(inst_id)
 
             self._dragging_instance_id = inst_id
+            self._drag_page_index = page_idx
             self._drag_start = (ratio_x, ratio_y)
-            for inst in self._last_instances:
+            for inst in instances:
                 if inst.instance_id == inst_id:
                     self._drag_start_pos = (inst.pos_x, inst.pos_y)
                     break
@@ -288,7 +441,21 @@ class PreviewCanvas(ctk.CTkFrame):
         if self._drag_start is None or self._dragging_instance_id is None:
             return
 
-        ratio_x, ratio_y = self._canvas_to_ratio(event.x, event.y)
+        # Use the page where drag started for coordinate mapping
+        page_idx = self._drag_page_index
+        if page_idx < 0 or page_idx >= len(self._page_offsets):
+            return
+
+        # Convert using the drag-start page coordinates
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        offset = self._page_offsets[page_idx]
+        disp_w, disp_h = self._page_display_sizes[page_idx]
+
+        local_y = canvas_y - offset
+        ratio_x = canvas_x / disp_w if disp_w > 0 else 0
+        ratio_y = local_y / disp_h if disp_h > 0 else 0
+
         dx = ratio_x - self._drag_start[0]
         dy = ratio_y - self._drag_start[1]
 
@@ -312,12 +479,19 @@ class PreviewCanvas(ctk.CTkFrame):
         else:
             self._render_placeholder()
 
+    def _on_mousewheel(self, event):
+        if sys.platform == "darwin":
+            self.canvas.yview_scroll(int(-event.delta / 4), "units")
+        else:
+            self.canvas.yview_scroll(max(-3, min(3, int(-event.delta / 120))), "units")
+        self._update_active_page()
+
     def _on_backspace(self, event):
         self._delete_selected()
 
     def _on_right_click(self, event):
-        ratio_x, ratio_y = self._canvas_to_ratio(event.x, event.y)
-        inst_id = self._find_instance_at(ratio_x, ratio_y)
+        page_idx, ratio_x, ratio_y = self._canvas_to_page_ratio(event.x, event.y)
+        inst_id = self._find_instance_at(page_idx, ratio_x, ratio_y)
         if inst_id:
             self._selected_instance_id = inst_id
             self._render()
@@ -330,10 +504,7 @@ class PreviewCanvas(ctk.CTkFrame):
     # ── File Drop ────────────────────────────────────────────────────
 
     def _setup_file_drop(self):
-        """Register canvas for OS-level file drag-drop.
-
-        Try tkinterdnd2 first, fall back to raw Tcl tkdnd calls.
-        """
+        """Register canvas for OS-level file drag-drop."""
         try:
             from tkinterdnd2 import DND_FILES
             self.canvas.drop_target_register(DND_FILES)
@@ -342,14 +513,13 @@ class PreviewCanvas(ctk.CTkFrame):
         except (ImportError, tk.TclError):
             pass
 
-        # Fallback: raw Tcl tkdnd extension
         try:
             self.canvas.tk.call('tkdnd::drop_target', 'register', self.canvas._w, 'DND_Files')
             self.canvas.tk.call('bind', self.canvas._w, '<<Drop>>',
                                 f'[list {self.canvas._w}._on_tkdnd_drop %D]')
             self.canvas._on_tkdnd_drop = lambda data: self._on_file_drop_raw(data)
         except tk.TclError:
-            pass  # No DnD support available
+            pass
 
     def _on_file_drop(self, event):
         """Handle OS file drop onto the canvas."""

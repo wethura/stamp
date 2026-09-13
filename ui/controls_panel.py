@@ -18,22 +18,20 @@ class ControlsPanel(ctk.CTkScrollableFrame):
     on_instance_property_changed = None
 
     def __init__(self, parent,
-                 on_preview_page_changed=None,
                  on_create_instance=None):
         super().__init__(
             parent,
             width=PANEL_WIDTH,
+            corner_radius=12,
+            border_width=1, border_color=Colors.BORDER_SUBTLE,
             fg_color=Colors.SURFACE_BASE,
             scrollbar_fg_color=Colors.SURFACE_BASE,
             scrollbar_button_color=Colors.SURFACE_RAISED,
             scrollbar_button_hover_color=Colors.SURFACE_OVERLAY,
         )
 
-        self.on_preview_page_changed = on_preview_page_changed
         self.on_create_instance = on_create_instance
 
-        self._page_count = 0
-        self._current_preview = 0
         self._stamp_manager = None
         self._instance_manager: Optional[StampInstanceManager] = None
         self._editing_instance_id: Optional[str] = None
@@ -57,11 +55,6 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         self._editing_instance_id = instance_id
         self._update_edit_controls()
 
-    def set_pages(self, count: int):
-        self._page_count = count
-        self._current_preview = 0
-        self._update_nav_label()
-
     # ═══════════════════════════════════════════════════════════════════
     #  UI Construction
     # ═══════════════════════════════════════════════════════════════════
@@ -72,29 +65,30 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         row = 0
 
         # ── Template Library Section ─────────────────────────────────
-        self._build_section_heading("章模板库", row)
+        self._build_section_heading("01   印章库", row)
         row += 1
 
         import_btn = ctk.CTkButton(
             self,
-            text="＋ 导入新章",
-            fg_color=Colors.PRIMARY,
-            hover_color=Colors.PRIMARY_HOVER,
-            text_color=Colors.PRIMARY_PALE,
+            text="＋  导入印章",
+            fg_color=Colors.SURFACE_RAISED,
+            hover_color=Colors.SURFACE_OVERLAY,
+            text_color=Colors.PRIMARY,
+            border_width=1, border_color=Colors.BORDER_SUBTLE,
             font=(Fonts.FAMILY, Fonts.BODY_SIZE, "bold"),
-            height=32,
+            height=40,
             corner_radius=6,
             command=self._import_stamp,
         )
-        import_btn.grid(row=row, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
+        import_btn.grid(row=row, column=0, padx=Spacing.PAD_LG, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
         row += 1
 
         # Scrollable stamp card grid — show one row at a time
-        # Card height (156) + vertical padding (4+4) + row spacing ≈ 170
+        # Space for a complete card row, including its actions.
         self._scroll_frame = ctk.CTkScrollableFrame(
-            self, fg_color="transparent", height=170,
+            self, fg_color="transparent", height=202,
         )
-        self._scroll_frame.grid(row=row, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="nsew")
+        self._scroll_frame.grid(row=row, column=0, padx=Spacing.PAD_LG, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="nsew")
         self._scroll_frame.grid_columnconfigure((0, 1), weight=1)
         row += 1
 
@@ -102,21 +96,23 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         self._build_separator(row)
         row += 1
 
-        self._build_section_heading("编辑章", row)
+        self._build_section_heading("02   印章调整", row)
         row += 1
 
         self._editing_label = ctk.CTkLabel(
             self,
             text="双击模板添加印章到页面",
-            font=(Fonts.FAMILY, Fonts.BODY_SIZE),
+            font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
             text_color=Colors.TEXT_SECONDARY,
+            fg_color=Colors.SURFACE_RAISED, corner_radius=8,
+            height=48, wraplength=260,
         )
-        self._editing_label.grid(row=row, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
+        self._editing_label.grid(row=row, column=0, padx=Spacing.PAD_LG, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
         row += 1
 
         # Sliders
         self._size_slider, self._size_label = self._add_slider_row(
-            row, "大  小", 5, 80, "%", self._on_size_changed)
+            row, "印章大小", 5, 80, "%", self._on_size_changed)
         row += 2
 
         self._opacity_slider, self._opacity_label = self._add_slider_row(
@@ -127,50 +123,14 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         self._build_rotation_row(row)
         row += 2
 
-        # ── Page Navigation ──────────────────────────────────────────
-        self._build_separator(row)
-        row += 1
-
-        self._build_section_heading("预览页", row)
-        row += 1
-
-        nav_frame = ctk.CTkFrame(self, fg_color="transparent")
-        nav_frame.grid(row=row, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_SM, Spacing.PAD_LG), sticky="ew")
-        nav_frame.grid_columnconfigure(1, weight=1)
-
-        prev_btn = ctk.CTkButton(
-            nav_frame, text="◀", width=36, height=30,
-            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
-            text_color=Colors.TEXT_PRIMARY,
-            font=("", 14), corner_radius=6,
-            command=self._prev_page,
-        )
-        prev_btn.grid(row=0, column=0, padx=(0, Spacing.PAD_XS))
-
-        self._page_label = ctk.CTkLabel(
-            nav_frame, text="- / -",
-            font=(Fonts.FAMILY, Fonts.HEADING_SIZE),
-            text_color=Colors.TEXT_PRIMARY,
-        )
-        self._page_label.grid(row=0, column=1, sticky="ew")
-
-        next_btn = ctk.CTkButton(
-            nav_frame, text="▶", width=36, height=30,
-            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
-            text_color=Colors.TEXT_PRIMARY,
-            font=("", 14), corner_radius=6,
-            command=self._next_page,
-        )
-        next_btn.grid(row=0, column=2, padx=(Spacing.PAD_XS, 0))
-
     def _build_section_heading(self, text: str, row: int):
-        """Create a compact section heading with gold text."""
+        """Create a section heading with a clear typographic hierarchy."""
         label = ctk.CTkLabel(
             self, text=text,
             font=(Fonts.FAMILY, Fonts.HEADING_SIZE, "bold"),
-            text_color=Colors.GOLD,
+            text_color=Colors.TEXT_PRIMARY,
         )
-        label.grid(row=row, column=0, padx=(Spacing.PAD_MD, Spacing.PAD_SM), pady=(Spacing.PAD_SM, Spacing.PAD_XS), sticky="w")
+        label.grid(row=row, column=0, padx=(Spacing.PAD_MD, Spacing.PAD_SM), pady=(Spacing.PAD_XL, Spacing.PAD_SM), sticky="w")
 
     def _build_separator(self, row: int):
         """Create a subtle 1px separator between sections."""
@@ -180,7 +140,7 @@ class ControlsPanel(ctk.CTkScrollableFrame):
     def _add_slider_row(self, row, label_text, from_val, to_val, unit, callback):
         """Create a labeled slider row. Returns (slider, value_label)."""
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=row, column=0, padx=Spacing.PAD_SM, sticky="ew")
+        header.grid(row=row, column=0, padx=Spacing.PAD_LG, sticky="ew")
         header.grid_columnconfigure(0, weight=1)
 
         name_label = ctk.CTkLabel(
@@ -215,18 +175,18 @@ class ControlsPanel(ctk.CTkScrollableFrame):
     def _build_rotation_row(self, row):
         """Create rotation controls: left 90°, input field, right 90°."""
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=row, column=0, padx=Spacing.PAD_SM, sticky="ew")
+        header.grid(row=row, column=0, padx=Spacing.PAD_LG, sticky="ew")
         header.grid_columnconfigure(1, weight=1)
 
         label = ctk.CTkLabel(
-            header, text="旋  转",
+            header, text="旋转角度",
             font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
             text_color=Colors.TEXT_PRIMARY,
         )
         label.grid(row=0, column=0, sticky="w")
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=row + 1, column=0, padx=Spacing.PAD_SM, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
+        btn_frame.grid(row=row + 1, column=0, padx=Spacing.PAD_LG, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
         btn_frame.grid_columnconfigure(1, weight=1)
 
         left_btn = ctk.CTkButton(
@@ -328,6 +288,13 @@ class ControlsPanel(ctk.CTkScrollableFrame):
             return
 
         stamps = self._stamp_manager.list_stamps()
+        if not stamps:
+            ctk.CTkLabel(
+                self._scroll_frame, text="尚未添加印章\n\n导入一张印章图片，建立你的印章库",
+                font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+                text_color=Colors.TEXT_SECONDARY, height=156,
+                wraplength=240,
+            ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=8)
         for idx, stamp in enumerate(stamps):
             row_idx = idx // 2
             col_idx = idx % 2
@@ -449,7 +416,7 @@ class ControlsPanel(ctk.CTkScrollableFrame):
 
         self._editing_label.configure(
             text=f"「{template_name}」 第 {inst.page_index + 1} 页",
-            text_color=Colors.PRIMARY_LIGHT,
+            text_color=Colors.PRIMARY,
         )
 
         self._size_slider.set(inst.size_ratio * 100)
@@ -472,27 +439,3 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         label.configure(text=f"{pct:.0f}{unit}")
         if self._editing_instance_id and self.on_instance_property_changed:
             self.on_instance_property_changed(self._editing_instance_id, opacity=pct / 100.0)
-
-    # ═══════════════════════════════════════════════════════════════════
-    #  Page Navigation
-    # ═══════════════════════════════════════════════════════════════════
-
-    def _prev_page(self):
-        if self._page_count > 0:
-            self._current_preview = (self._current_preview - 1) % self._page_count
-            self._update_nav_label()
-            if self.on_preview_page_changed:
-                self.on_preview_page_changed(self._current_preview)
-
-    def _next_page(self):
-        if self._page_count > 0:
-            self._current_preview = (self._current_preview + 1) % self._page_count
-            self._update_nav_label()
-            if self.on_preview_page_changed:
-                self.on_preview_page_changed(self._current_preview)
-
-    def _update_nav_label(self):
-        if self._page_count == 0:
-            self._page_label.configure(text="- / -")
-        else:
-            self._page_label.configure(text=f"{self._current_preview + 1}  /  {self._page_count}")

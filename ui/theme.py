@@ -2,8 +2,8 @@
 Centralized theme module for Stamp Tool (CustomTkinter).
 
 Provides visual constants (colors, fonts, spacing) and theme initialization.
-Design language: "Mo Yun" (墨韵 Ink & Seal) — inspired by Linear / Raycast
-layered-surface dark-mode aesthetic with seal-red identity accent.
+Design language: "Mo Yun" (墨韵 Ink & Seal) — clean light theme with
+seal-red identity accent, inspired by macOS native app aesthetics.
 """
 
 import os
@@ -23,38 +23,37 @@ _IS_WINDOWS = os.name == "nt"
 
 
 class Colors:
-    """Application color palette — layered surfaces + seal-red accent + gold trim."""
+    """Application color palette — light surfaces + seal-red accent."""
 
-    # ── Surface hierarchy (dark mode, 5 levels) ───────────────────────
-    # Deepest background → lightest raised element.
-    SURFACE_CANVAS = "#0D0F14"       # Level 0 — main canvas / deepest void
-    SURFACE_BASE = "#141720"         # Level 1 — toolbar, sidebar, status bar
-    SURFACE_RAISED = "#1C1F2E"       # Level 2 — cards, input fields
-    SURFACE_OVERLAY = "#252838"      # Level 3 — dropdowns, hover on raised
-    SURFACE_HOVER = "#2E3148"        # Level 4 — hover on overlay-level items
+    # ── Surface hierarchy (light mode, 5 levels) ────────────────────
+    SURFACE_CANVAS = "#EEECE7"       # Level 0 — canvas / warm paper gray
+    SURFACE_BASE = "#FFFEFB"         # Level 1 — toolbar, sidebar, status bar
+    SURFACE_RAISED = "#F7F5F1"       # Level 2 — cards, input fields
+    SURFACE_OVERLAY = "#EBE8E4"      # Level 3 — hover on cards, slider track
+    SURFACE_HOVER = "#E0DDD8"        # Level 4 — active / pressed states
 
-    # ── Seal red (印泥红) — primary accent, used sparingly ───────────
-    PRIMARY = "#C14443"
-    PRIMARY_HOVER = "#D45554"
+    # ── Seal red (印泥红) — primary accent ──────────────────────────
+    PRIMARY = "#B63D32"
+    PRIMARY_HOVER = "#982F26"
     PRIMARY_DARK = "#9E2F2E"
     PRIMARY_LIGHT = "#E8A5A4"
-    PRIMARY_PALE = "#F5F0E8"
+    PRIMARY_PALE = "#FFFFFF"
 
     # ── Text ──────────────────────────────────────────────────────────
-    TEXT_PRIMARY = "#F0EDE6"          # Main text — warm white
-    TEXT_SECONDARY = "#8B8FA3"        # Labels, descriptions
-    TEXT_TERTIARY = "#5C6070"         # Disabled, hints
-    TEXT_ON_DARK = "#E8E4DE"          # Legacy alias → TEXT_PRIMARY
+    TEXT_PRIMARY = "#292925"          # Main text — near black
+    TEXT_SECONDARY = "#716E67"        # Labels, descriptions
+    TEXT_TERTIARY = "#969188"         # Disabled, hints
+    TEXT_ON_DARK = "#292925"          # Alias → TEXT_PRIMARY
 
     # ── Decorative / semantic ─────────────────────────────────────────
-    GOLD = "#C9A96E"                  # Section headings, accent trim
-    BORDER_SUBTLE = "#1E2130"         # 1px dividers between sections
-    DANGER = "#ff6b6b"                # Delete / destructive actions
+    GOLD = "#A07850"                  # Section headings
+    BORDER_SUBTLE = "#E0DDD8"         # 1px dividers between sections
+    DANGER = "#E04040"                # Delete / destructive actions
 
     # ── Selection ────────────────────────────────────────────────────
-    ACCENT_SELECTION = "#C14443"
+    ACCENT_SELECTION = "#B63D32"
 
-    # ── Legacy aliases (backward compat, will migrate gradually) ─────
+    # ── Legacy aliases ───────────────────────────────────────────────
     BG_DARK = SURFACE_CANVAS
     BG_CARD = SURFACE_RAISED
 
@@ -78,9 +77,9 @@ class Fonts:
     """Application typography presets — 4px-aligned size scale."""
 
     FAMILY = _CJK_FONT
-    HEADING_SIZE = 14
-    BODY_SIZE = 12
-    SMALL_SIZE = 10
+    HEADING_SIZE = 16
+    BODY_SIZE = 13
+    SMALL_SIZE = 12
     SPLASH_TITLE_SIZE = 32
     SPLASH_SUBTITLE_SIZE = 13
     SPLASH_LOADING_SIZE = 12
@@ -101,15 +100,15 @@ class Spacing:
 
 # ── Layout Constants ──────────────────────────────────────────────────
 
-PANEL_WIDTH = 280
+PANEL_WIDTH = 304
 
 
 # ── Theme Initialization ──────────────────────────────────────────────
 
 
 def init_theme():
-    """Initialize CustomTkinter dark mode. Call once before creating windows."""
-    ctk.set_appearance_mode("dark")
+    """Initialize CustomTkinter light mode. Call once before creating windows."""
+    ctk.set_appearance_mode("light")
 
 
 def load_app_icon(window):
