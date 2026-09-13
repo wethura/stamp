@@ -1,16 +1,5 @@
 """拖入文档支持测试"""
 import unittest
-from unittest.mock import MagicMock, patch
-import os
-import sys
-
-# Mock tkinter for headless testing
-sys.modules['tkinter'] = MagicMock()
-sys.modules['tkinter.ttk'] = MagicMock()
-sys.modules['tkinter.filedialog'] = MagicMock()
-sys.modules['tkinter.messagebox'] = MagicMock()
-sys.modules['tkinter.simpledialog'] = MagicMock()
-
 from processing.registry import HandlerRegistry
 from processing.handlers.pdf_handler import PDFHandler
 from processing.handlers.image_handler import ImageHandler

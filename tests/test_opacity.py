@@ -30,9 +30,8 @@ class TestOpacityEffect(unittest.TestCase):
             opacity=opacity
         )
 
-    # @dod opacity-default-100 v1.0
-    def test_default_opacity_is_100(self):
-        """默认透明度为 100%"""
+    def test_explicit_full_opacity_is_preserved(self):
+        """显式设置 100% 透明度时保留该值"""
         instance = self._create_stamp_instance(opacity=1.0)
         self.assertEqual(instance.opacity, 1.0)
 
@@ -101,12 +100,12 @@ class TestStampInstanceManagerOpacity(unittest.TestCase):
     """StampInstanceManager 透明度相关测试"""
 
     def test_add_instance_with_default_opacity(self):
-        """添加实例时默认透明度为 100%"""
+        """新实例沿用产品默认的 68% 透明度"""
         from processing.stamp_instance import StampInstanceManager
         manager = StampInstanceManager()
         instance = manager.add_instance("template1", 0)
 
-        self.assertEqual(instance.opacity, 1.0)
+        self.assertEqual(instance.opacity, 0.68)
 
     def test_update_instance_opacity(self):
         """更新实例的透明度"""

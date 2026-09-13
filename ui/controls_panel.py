@@ -452,18 +452,25 @@ class ControlsPanel(ctk.CTkScrollableFrame):
     def _on_stamp_drag_release(self, event):
         import tkinter as tk
 
-        root = self.winfo_toplevel()
-        if hasattr(self, '_drag_motion_binding'):
-            root.unbind("<B1-Motion>", self._drag_motion_binding)
-        if hasattr(self, '_drag_release_binding'):
-            root.unbind("<ButtonRelease-1>", self._drag_release_binding)
-
-        if hasattr(self, '_drag_window') and self._drag_window.winfo_exists():
-            self._drag_window.destroy()
-
         template_id = getattr(self, '_drag_template_id', None)
         if template_id is None:
             return
+        # Consume the drag even when released outside the preview.
+        self._drag_template_id = None
+
+        root = self.winfo_toplevel()
+        if hasattr(self, '_drag_motion_binding'):
+            root.unbind("<B1-Motion>", self._drag_motion_binding)
+            del self._drag_motion_binding
+        if hasattr(self, '_drag_release_binding'):
+            root.unbind("<ButtonRelease-1>", self._drag_release_binding)
+            del self._drag_release_binding
+
+        if hasattr(self, '_drag_window'):
+            if self._drag_window.winfo_exists():
+                self._drag_window.destroy()
+            del self._drag_window
+        self._drag_photo_ref = None
 
         target = getattr(self, '_drop_target', None)
         if target is None:

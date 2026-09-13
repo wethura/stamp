@@ -244,7 +244,7 @@ class TestControlsPanelTemplateLibrary(unittest.TestCase):
             id="tmpl1", name="TestStamp", image_base64="", created_at="2026-01-01"
         )
 
-        panel._on_stamp_double_click("tmpl1")
+        panel._on_card_double_click("tmpl1")
 
         create_callback.assert_called_once_with("tmpl1")
 
@@ -253,15 +253,11 @@ class TestControlsPanelTemplateLibrary(unittest.TestCase):
         panel = ControlsPanel.__new__(ControlsPanel)
 
         panel._editing_label = MagicMock()
-        panel._size_var = MagicMock()
         panel._size_label = MagicMock()
         panel._size_slider = MagicMock()
-        panel._opacity_var = MagicMock()
         panel._opacity_label = MagicMock()
         panel._opacity_slider = MagicMock()
-        panel._rotation_var = MagicMock()
-        panel._rotation_label = MagicMock()
-        panel._rotation_slider = MagicMock()
+        panel._rotation_entry = MagicMock()
         panel._stamp_manager = MagicMock()
         panel._instance_manager = MagicMock()
 
@@ -281,9 +277,15 @@ class TestControlsPanelTemplateLibrary(unittest.TestCase):
         panel._editing_instance_id = "inst1"
         panel._update_edit_controls()
 
-        label_text = panel._editing_label.config.call_args[1].get('text', '')
+        label_text = panel._editing_label.configure.call_args[1].get('text', '')
         self.assertIn("TestStamp", label_text)
         self.assertIn("3", label_text)  # page_index 2 -> display "第3页"
+        panel._size_slider.set.assert_called_once_with(30)
+        panel._size_label.configure.assert_called_once_with(text="30%")
+        panel._opacity_slider.set.assert_called_once_with(70)
+        panel._opacity_label.configure.assert_called_once_with(text="70%")
+        panel._rotation_entry.delete.assert_called_once_with(0, "end")
+        panel._rotation_entry.insert.assert_called_once_with(0, "45")
 
 
 def _find_at(display_list, instances, ratio_x, ratio_y, disp_w, disp_h):
