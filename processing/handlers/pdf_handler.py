@@ -2,10 +2,9 @@
 import fitz
 from PIL import Image
 from typing import Set, Tuple, Optional
-import io
 
 from processing.base import DocumentHandler
-from processing.stamp import apply_rotation, scale_stamp, to_png_bytes
+from processing.stamp import apply_rotation, to_png_bytes
 
 
 class PDFHandler(DocumentHandler):
@@ -78,6 +77,10 @@ class PDFHandler(DocumentHandler):
             raise RuntimeError("文档未加载")
 
         x_ratio, y_ratio = position_ratio
+        # Rotate at source resolution. PDF placement uses points, independently
+        # of the embedded raster's pixels, so no downsampling is necessary.
+        export_img = apply_rotation(stamp_img, rotation)
+        stamp_bytes = to_png_bytes(export_img)
 
         out_doc = fitz.open()
         out_doc.insert_pdf(self._doc)
@@ -90,16 +93,15 @@ class PDFHandler(DocumentHandler):
             pw = page.rect.width
             ph = page.rect.height
 
-            # Scale first (based on original dimensions), then rotate
-            scaled = scale_stamp(stamp_img, int(pw), stamp_size_ratio)
-            if rotation != 0:
-                scaled = apply_rotation(scaled, rotation)
-
-            sw, sh = scaled.size
+            # Base the scale on the unrotated width, then include the expanded
+            # rotation canvas without changing the stamp's physical scale.
+            points_per_pixel = max(1.0, pw * stamp_size_ratio) / stamp_img.width
+            sw = export_img.width * points_per_pixel
+            sh = export_img.height * points_per_pixel
             x = x_ratio * pw
             y = y_ratio * ph
             stamp_rect = fitz.Rect(x, y, x + sw, y + sh)
-            page.insert_image(stamp_rect, stream=to_png_bytes(scaled), overlay=True)
+            page.insert_image(stamp_rect, stream=stamp_bytes, overlay=True)
 
         out_doc.save(output_path)
         out_doc.close()
