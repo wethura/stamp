@@ -103,9 +103,18 @@ jobs:
       - name: Smoke-check app bundle (selftest)
         run: |
           BIN=dist/StampTool.app/Contents/MacOS/StampTool
-          test -x "$BIN" || { echo "app bundle not produced"; ls -la dist/; exit 1; }
-          # 自检：窗口真正映射才通过（导入链/资源缺失都会失败）
-          STAMPTOOL_SELFTEST=full timeout 120 "$BIN"
+          test -x "$BIN" || { echo "::error::app bundle not produced"; exit 1; }
+          # 自检：窗口布局就绪 + 核心链路（渲染/盖章/导出）
+          set +e
+          OUTPUT=$(STAMPTOOL_SELFTEST=full timeout 120 "$BIN" 2>&1)
+          CODE=$?
+          echo "$OUTPUT"
+          if [ $CODE -ne 0 ]; then
+            echo "$OUTPUT" | while IFS= read -r line; do
+              echo "::error::selftest(exit=$CODE): $line"
+            done
+            exit 1
+          fi
           ls -la dist/
       - name: Package dmg and zip
         run: |
