@@ -10,11 +10,15 @@ class TestDropSupport(unittest.TestCase):
     """拖入文档支持测试"""
 
     def setUp(self):
-        # 确保处理器已注册
+        # 保存并隔离注册表状态，测试后恢复（不污染其他用例）
+        self._saved_handlers = list(HandlerRegistry._handlers)
         HandlerRegistry._handlers = []
         HandlerRegistry.register(PDFHandler)
         HandlerRegistry.register(ImageHandler)
         HandlerRegistry.register(ExcelHandler)
+
+    def tearDown(self):
+        HandlerRegistry._handlers = self._saved_handlers
 
     # @dod drop-supported-file v1.0
     def test_drop_supported_pdf_file(self):

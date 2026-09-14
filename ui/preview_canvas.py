@@ -101,6 +101,7 @@ class PreviewCanvas(ctk.CTkFrame):
         self._page_display_sizes: List[Tuple[int, int]] = []
         self._page_photos: List[Optional[ImageTk.PhotoImage]] = []
         self._page_display_data: Dict[int, List[tuple]] = {}
+        self._photo_cache: Dict[tuple, tuple] = {}
 
         self._selected_instance_id: Optional[str] = None
         self._drag_start: Optional[Tuple[float, float]] = None
@@ -160,6 +161,9 @@ class PreviewCanvas(ctk.CTkFrame):
         """Refresh the preview with all pages and stamp instances."""
         if not pages:
             return
+        if pages is not self._pages:
+            # New document (or page objects re-rendered): nothing is reusable.
+            self._photo_cache = {}
         self._has_document = True
         self._pages = pages
         self._all_instances = all_instances if all_instances else {}
@@ -169,6 +173,15 @@ class PreviewCanvas(ctk.CTkFrame):
     def get_active_page(self) -> int:
         """Return the current active page index based on scroll position."""
         return self._active_page
+
+    def clear_selection(self, instance_id: Optional[str] = None):
+        """Drop canvas-side selection (e.g., after the instance was deleted).
+
+        Without this the stale id keeps 'handling' arrow-key nudges, which
+        silently disables view scrolling until another stamp is selected.
+        """
+        if instance_id is None or self._selected_instance_id == instance_id:
+            self._selected_instance_id = None
 
     @property
     def page_count(self) -> int:
@@ -228,12 +241,29 @@ class PreviewCanvas(ctk.CTkFrame):
 
         total_height = y_offset - PAGE_GAP if self._pages else 0
 
-        # Render each page with stamps composited
+        # Render each page with stamps composited. Pages whose instances and
+        # display size are unchanged reuse the cached PhotoImage — without
+        # this, every drag tick re-resized all pages (0.9s at 100 pages).
+        new_cache = {}
+        self._page_photos = []
         for i, page_img in enumerate(self._pages):
             disp_w, disp_h = self._page_display_sizes[i]
-            page_disp = page_img.resize((disp_w, disp_h), Image.LANCZOS).convert("RGBA")
-
             instances = self._all_instances.get(i, [])
+            fingerprint = tuple(
+                (inst.instance_id, inst.template_id, inst.size_ratio, inst.opacity,
+                 inst.rotation, round(inst.pos_x, 6), round(inst.pos_y, 6))
+                for inst in instances
+            )
+            key = (i, disp_w, disp_h)
+            cached = self._photo_cache.get(key)
+            if cached and cached[0] == fingerprint:
+                fingerprint_, photo, page_display = cached
+                new_cache[key] = cached
+                self._page_photos.append(photo)
+                self._page_display_data[i] = page_display
+                continue
+
+            page_disp = page_img.resize((disp_w, disp_h), Image.LANCZOS).convert("RGBA")
             page_display = []
             for inst in instances:
                 img = self._template_images.get(inst.template_id)
@@ -259,9 +289,12 @@ class PreviewCanvas(ctk.CTkFrame):
                 page_disp.paste(img, (x, y), mask=img)
                 page_display.append((stamp_w, stamp_h, x, y, inst.instance_id))
 
-            self._page_display_data[i] = page_display
             photo = ImageTk.PhotoImage(page_disp.convert("RGB"))
+            entry = (fingerprint, photo, page_display)
+            new_cache[key] = entry
             self._page_photos.append(photo)
+            self._page_display_data[i] = page_display
+        self._photo_cache = new_cache
 
         # Draw to canvas
         self.canvas.delete("all")

@@ -111,6 +111,7 @@ class App:
                     self.instance_manager.remove_instance(instance.instance_id)
             if self._selected_instance_id and self.instance_manager.get_instance(self._selected_instance_id) is None:
                 self._selected_instance_id = None
+                self.window.preview.clear_selection()
                 self.window.controls.set_editing_instance(None)
         self._refresh_preview()
 
@@ -131,6 +132,7 @@ class App:
             return
 
         self.instance_manager.remove_instance(instance_id)
+        self.window.preview.clear_selection(instance_id)
         if self._selected_instance_id == instance_id:
             self._selected_instance_id = None
             self.window.controls.set_editing_instance(None)
