@@ -31,7 +31,12 @@ corrupt 样本的教训已固化为设计约束：**进入任何引擎前，先�
 | 日期 | OS | 引擎 | 结论 | 备注 |
 |---|---|---|---|---|
 | 2026-09-14 | — | Word COM（`Word.Application`）/ WPS COM（`kwps.application` 等）/ LibreOffice | **已实现，待实机验证** | 引擎与进程归属规则按 spec P0.2 实现（DispatchEx 独立实例 + watchdog、附着实例永不 Quit、ExportAsFixedFormat→SaveAs2 回退、注册表 ProgID 探测）；8 项假 COM 桩测试通过（含进程归属与回退路径）。真实 Windows + Office/WPS 环境的转换验证未做，待 P0.2/P3 实机执行 |
-| 2026-09-14 | CI windows-latest | 打包（PyInstaller + pywin32 hiddenimports） | **CI 自动化** | GitHub Actions：双平台单测 + exe/二进制构建 + 产物上传 + tag 发布；绿色 ≠ 实机可用，GUI/COM 运行验收仍属 P3 |
+| 2026-09-14 | CI windows-latest（Server 2022 x64） | 全部 136 项测试 | **通过** | 含 COM 引擎桩测试、DOCX 前置校验、转换服务状态机、GUI 冒烟（CTk 在 runner 有窗口服务）。CI runner 未安装 Office/WPS，因此**不覆盖**真实 COM 转换；「测试通过」≠「Windows 上 Word 转换可用」 |
+| 2026-09-14 | CI windows-latest | 打包产物 `StampTool.exe`（49.5 MB） | **构建 + 启动验证通过** | PyInstaller 6.x + pywin32 hiddenimports；启动后进程存活（立即退出会判定为打包/导入失败）。GUI 交互与 COM 转换仍属 P3 实机验收 |
+| 2026-09-14 | CI macos-latest | 打包产物 `StampTool.app`（zip 41.1 MB） | **构建 + 启动验证通过** | 保留 .app 形态（双击、图标、plist）；启动验证进程存活。源码运行不等于打包通过——此项为打包验收的第一步证据 |
+| 2026-09-14 | 跨平台 | 实例/模板 ID 唯一性 | **修复** | `datetime` 微秒时间戳在 Windows（时钟粒度 ~15.6ms）连续创建会撞 ID，导致选中/删除错乱、模板误删。已加单调序号（`processing/stamp_instance.py`、`processing/stamp_manager.py`），CI 上由 11 项失败收敛为全绿 |
+
+产物下载：GitHub Actions 运行页 artifacts（保留 90 天），或打 `v*` tag 触发 Release 永久归档。
 
 ## Linux
 
