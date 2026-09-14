@@ -22,6 +22,14 @@ from ui.main_window import MainWindow
 
 class TestGuiSmoke(unittest.TestCase):
     @classmethod
+    def _pump(cls, rounds: int = 3):
+        """多轮事件泵：Windows 下一轮 update 可能不足以完成子组件布局，
+        canvas 未 sizing 会让渲染早退、页码指示停在前一状态。"""
+        for _ in range(rounds):
+            cls.root.update_idletasks()
+            cls.root.update()
+
+    @classmethod
     def setUpClass(cls):
         try:
             import customtkinter as ctk
@@ -36,15 +44,14 @@ class TestGuiSmoke(unittest.TestCase):
         cls.app = App()
         cls.window = MainWindow(cls.root, cls.app)
         cls.app.window = cls.window
-        cls.window.update_idletasks()
-        cls.window.update()
+        cls._pump()
         cls.app.pages = [Image.new("RGB", (800, 1130)) for _ in range(6)]
         cls.app.instance_manager = StampInstanceManager()
         cls.window.controls.set_instance_manager(cls.app.instance_manager)
         cls._img = Image.new("RGBA", (100, 100), (200, 0, 0, 255))
         cls.app.get_template_image = lambda tid: cls._img
         cls.app._refresh_preview()
-        cls.window.update()
+        cls._pump()
 
     @classmethod
     def tearDownClass(cls):
@@ -56,16 +63,16 @@ class TestGuiSmoke(unittest.TestCase):
     def setUp(self):
         """每用例回到第一页的干净导航状态。"""
         self.window.preview.reset_view()
-        self.window.update()
+        self._pump()
 
     def _refresh(self):
         self.app._refresh_preview()
-        self.window.update()
+        self._pump()
 
     def _click_at(self, page, ratio):
         pv = self.window.preview
         pv.scroll_to_page(page)
-        self.window.update()
+        self._pump()
         total = pv._page_offsets[-1] + pv._page_display_sizes[-1][1]
         view_top = pv.canvas.yview()[0] * total
         ev = MagicMock()
@@ -85,7 +92,7 @@ class TestGuiSmoke(unittest.TestCase):
     def test_scroll_to_page_clamps_and_updates_indicator(self):
         pv = self.window.preview
         pv.scroll_to_page(99)
-        self.window.update()
+        self._pump()
         self.assertEqual(pv.get_active_page(), 5)
         self.assertEqual(self.app.active_page, 5)
         self.assertEqual(self.window._page_label.cget("text"), "第 6 / 6 页")
@@ -96,7 +103,7 @@ class TestGuiSmoke(unittest.TestCase):
     def test_click_hits_correct_page(self):
         ev = self._click_at(4, 0.05)
         pv = self.window.preview
-        self.window.update()
+        self._pump()
         self.assertEqual(pv.get_active_page(), 4)
         self.assertEqual(self.app.active_page, 4)
         self.assertIsNone(pv._selected_instance_id)
@@ -105,7 +112,7 @@ class TestGuiSmoke(unittest.TestCase):
         pv = self.window.preview
         pv.scroll_to_page(5)
         pv.reset_view()
-        self.window.update()
+        self._pump()
         self.assertEqual(pv.get_active_page(), 0)
         self.assertEqual(self.window._page_label.cget("text"), "第 1 / 6 页")
 
@@ -170,7 +177,7 @@ class TestGuiSmoke(unittest.TestCase):
         pv = self.window.preview
         pv._selected_instance_id = None
         pv.canvas.yview_moveto(0)
-        self.window.update()
+        self._pump()
         before = pv.canvas.yview()[0]
         pv._on_arrow_key(0, 1)
         self.assertNotEqual(pv.canvas.yview()[0], before)
@@ -226,7 +233,7 @@ class TestGuiSmoke(unittest.TestCase):
         self.app.active_page = 3
         cp._on_stamp_drag_release(MagicMock(x_root=pv.winfo_rootx() + 50,
                                             y_root=pv.winfo_rooty() + 50))
-        self.window.update()
+        self._pump()
         self.assertEqual(created, ["tmpl"])
         instances = self.app.instance_manager.list_instances()
         self.assertEqual(instances[-1].page_index, 3)

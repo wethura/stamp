@@ -1,6 +1,7 @@
 """章实例管理器 - 管理页级章实例配置（仅内存）"""
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import count
 from typing import List, Optional
 
 
@@ -23,10 +24,13 @@ class StampInstanceManager:
     def __init__(self, doc_path: str = ""):
         self._doc_path = doc_path
         self._instances: List[StampInstance] = []
+        self._id_seq = count(1)
 
     def add_instance(self, template_id: str, page_index: int) -> StampInstance:
         """添加新实例到指定页面"""
-        instance_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        # 时钟分辨率低的平台（如 Windows ~15ms）连续创建会撞 ID，
+        # 追加单调序号保证同一管理器内绝对唯一
+        instance_id = f"{datetime.now().strftime('%Y%m%d%H%M%S%f')}-{next(self._id_seq)}"
         instance = StampInstance(
             instance_id=instance_id,
             template_id=template_id,
