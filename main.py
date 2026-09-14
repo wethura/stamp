@@ -49,6 +49,15 @@ def _selftest_core_pipeline() -> None:
     finally:
         handler.close()
 
+    # App 层：双击添加印章的取值路径（曾因字段漂移在此崩溃）
+    from processing.stamp_instance import StampInstanceManager
+    controller = create_app_controller()
+    if not hasattr(controller, "active_page"):
+        raise RuntimeError("controller lacks active_page — 添加印章会崩溃")
+    instance = StampInstanceManager().add_instance("selftest", controller.active_page)
+    if instance.page_index != controller.active_page:
+        raise RuntimeError("instance not bound to active page")
+
 
 def _run_selftest(root, timeout_s: float = 25.0):
     """打包自检：窗口可用 + （full 模式）核心链路可跑。

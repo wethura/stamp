@@ -32,11 +32,14 @@ corrupt 样本的教训已固化为设计约束：**进入任何引擎前，先�
 |---|---|---|---|---|
 | 2026-09-14 | — | Word COM（`Word.Application`）/ WPS COM（`kwps.application` 等）/ LibreOffice | **已实现，待实机验证** | 引擎与进程归属规则按 spec P0.2 实现（DispatchEx 独立实例 + watchdog、附着实例永不 Quit、ExportAsFixedFormat→SaveAs2 回退、注册表 ProgID 探测）；8 项假 COM 桩测试通过（含进程归属与回退路径）。真实 Windows + Office/WPS 环境的转换验证未做，待 P0.2/P3 实机执行 |
 | 2026-09-14 | CI windows-latest（Server 2022 x64） | 全部 136 项测试 | **通过** | 含 COM 引擎桩测试、DOCX 前置校验、转换服务状态机、GUI 冒烟（CTk 在 runner 有窗口服务）。CI runner 未安装 Office/WPS，因此**不覆盖**真实 COM 转换；「测试通过」≠「Windows 上 Word 转换可用」 |
-| 2026-09-14 | CI windows-latest | 打包产物 `StampTool.exe`（49.5 MB） | **构建 + 启动验证通过** | PyInstaller 6.x + pywin32 hiddenimports；启动后进程存活（立即退出会判定为打包/导入失败）。GUI 交互与 COM 转换仍属 P3 实机验收 |
-| 2026-09-14 | CI macos-latest | 打包产物 `StampTool.app`（zip 41.1 MB） | **构建 + 启动验证通过** | 保留 .app 形态（双击、图标、plist）；启动验证进程存活。源码运行不等于打包通过——此项为打包验收的第一步证据 |
-| 2026-09-14 | 跨平台 | 实例/模板 ID 唯一性 | **修复** | `datetime` 微秒时间戳在 Windows（时钟粒度 ~15.6ms）连续创建会撞 ID，导致选中/删除错乱、模板误删。已加单调序号（`processing/stamp_instance.py`、`processing/stamp_manager.py`），CI 上由 11 项失败收敛为全绿 |
+| 2026-09-14 | CI windows-latest | 打包产物 `StampTool.exe` | **构建 + 自检通过** | PyInstaller 6.x + pywin32 hiddenimports；自检在打包环境验证：窗口布局就绪 + 核心链路（构造 PDF → 渲染 → 盖章 → 导出）+ App 层加章取值路径。**GUI 交互与真实 Office COM 转换仍属 P3 实机验收** |
+| 2026-09-14 | CI macos-latest | 打包产物 `StampTool.app`（dmg / zip） | **构建 + 自检通过** | 同上自检；保留 .app 形态（双击、图标、plist），dmg 含 /Applications 拖拽链接 |
+| 2026-09-14 | macOS 26.6.2 arm64 | **v0.1.1 发布产物实测** | **通过** | 从 GitHub Release 下载 dmg → 装入 /Applications → 完整自检通过（窗口映射 1180x800 + 渲染/盖章/导出链路）。CI runner 无显示会话，只有本地环境能验证窗口真实映射 |
+| 2026-09-14 | 跨平台 | 实例/模板 ID 唯一性 | **修复** | `datetime` 微秒时间戳在 Windows（时钟粒度 ~15.6ms）连续创建会撞 ID，导致选中/删除错乱、模板误删。已加单调序号（`processing/stamp_instance.py`、`processing/stamp_manager.py`） |
+| 2026-09-14 | 全平台 | 启动路径「双击加章崩溃」 | **修复（v0.1.0 → v0.1.1）** | `main.py` 用 `App.__new__`+手写字段构造控制器，字段名 `current_preview_page` 与 `App.active_page` 漂移，导致打包版与源码运行双击加章即 AttributeError（核心功能不可用）。改为经 `App()` 构造，新增 `tests/test_startup_path.py` 锁定契约；**请使用 v0.1.1 及以后版本** |
+| 2026-09-14 | CI/CD | GitHub Actions 发布流水线 | **可用** | 双平台测试矩阵 → PyInstaller 构建 → 打包自检 → 产物上传；打 `v*` tag 自动发 Release（dmg + zip + exe zip）。发布前只需 `git tag -a vX.Y.Z && git push origin vX.Y.Z` |
 
-产物下载：GitHub Actions 运行页 artifacts（保留 90 天），或打 `v*` tag 触发 Release 永久归档。
+产物下载：GitHub Releases 页（v0.1.1 起为修复版）。
 
 ## Linux
 
