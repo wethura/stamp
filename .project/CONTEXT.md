@@ -5,6 +5,9 @@
 
 ## 开发工具
 
+## 待推进规划
+- **Word 文档适配（含 WPS）**：已形成执行规格，下一步 P0 跨平台转换验证；未实现，Linux 正式分发仍待评估。→ [执行规格](plans/word-support/spec.md) · [调研依据](research/word-support.md)
+
 ## 技术栈
 Python + tkinter + PyMuPDF + Pillow + numpy + openpyxl + PyInstaller
 
