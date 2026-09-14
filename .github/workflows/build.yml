@@ -105,14 +105,25 @@ jobs:
           BIN=dist/StampTool.app/Contents/MacOS/StampTool
           test -x "$BIN" || { echo "::error::app bundle not produced"; exit 1; }
           # 自检：窗口布局就绪 + 核心链路（渲染/盖章/导出）
-          set +e
-          OUTPUT=$(STAMPTOOL_SELFTEST=full timeout 120 "$BIN" 2>&1)
-          CODE=$?
-          echo "$OUTPUT"
-          if [ $CODE -ne 0 ]; then
-            echo "$OUTPUT" | while IFS= read -r line; do
+          # 不用 timeout(1)：macOS runner 无 GNU coreutils
+          STAMPTOOL_SELFTEST=full "$BIN" > selftest.log 2>&1 &
+          PID=$!
+          for _ in $(seq 1 120); do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID" 2>/dev/null
+            echo "::error::selftest timed out after 120s"
+            cat selftest.log
+            exit 1
+          fi
+          wait "$PID"; CODE=$?
+          cat selftest.log
+          if [ "$CODE" -ne 0 ]; then
+            while IFS= read -r line; do
               echo "::error::selftest(exit=$CODE): $line"
-            done
+            done < selftest.log
             exit 1
           fi
           ls -la dist/
