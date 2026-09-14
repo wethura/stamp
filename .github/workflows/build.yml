@@ -46,9 +46,17 @@ jobs:
           python-version: "3.10"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Determine version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
       - name: Build with PyInstaller
         run: pyinstaller -y StampTool-win.spec
-      - name: Smoke-check exe
+      - name: Smoke-check exe and package zip
         shell: pwsh
         run: |
           if (-Not (Test-Path "dist/StampTool.exe")) { throw "StampTool.exe not produced" }
@@ -59,14 +67,18 @@ jobs:
           if ($proc.HasExited) { throw "exe exited immediately (code $($proc.ExitCode)) — likely a packaging/import failure" }
           "exe launched and stayed alive (pid $($proc.Id))"
           Stop-Process -Id $proc.Id -Force
+          # Windows 分发习惯：单文件 exe 打包成 zip
+          $zip = "dist\StampTool-$env:VERSION-windows-x64.zip"
+          Compress-Archive -Path "dist\StampTool.exe" -DestinationPath $zip -Force
+          "packaged: $zip"
       - uses: actions/upload-artifact@v4
         with:
           name: StampTool-windows-x64
-          path: dist/StampTool.exe
+          path: dist/StampTool-*-windows-x64.zip
           if-no-files-found: error
 
   build-macos:
-    name: build macos binary
+    name: build macos app
     runs-on: macos-latest
     needs: test
     steps:
@@ -76,13 +88,19 @@ jobs:
           python-version: "3.10"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Determine version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
       - name: Build with PyInstaller
         run: pyinstaller -y StampTool.spec
-      - name: Smoke-check app bundle and package zip
+      - name: Smoke-check app bundle
         run: |
           BIN=dist/StampTool.app/Contents/MacOS/StampTool
           test -x "$BIN" || { echo "app bundle not produced"; ls -la dist/; exit 1; }
-          ls -la dist/
           # 启动验证：初始化成功的 GUI 进程不会立即退出
           "$BIN" & APP_PID=$!
           sleep 8
@@ -93,12 +111,26 @@ jobs:
             echo "app exited immediately — likely a packaging/import failure"
             exit 1
           fi
-          # 保留 .app 形态（可双击、带图标），zip 保权限位
-          cd dist && zip -qry StampTool-macos.zip StampTool.app
+          ls -la dist/
+      - name: Package dmg and zip
+        run: |
+          ARCH=$(uname -m)
+          # macOS 分发习惯：dmg + Applications 快捷方式，拖拽安装
+          STAGE=$(mktemp -d)
+          cp -R dist/StampTool.app "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "StampTool $VERSION" -srcfolder "$STAGE" \
+            -ov -format UDZO "dist/StampTool-${VERSION}-macos-${ARCH}.dmg"
+          rm -rf "$STAGE"
+          # 备用 zip（保权限位）
+          ( cd dist && zip -qry "StampTool-${VERSION}-macos-${ARCH}.zip" StampTool.app )
+          ls -la dist/*.dmg dist/*.zip
       - uses: actions/upload-artifact@v4
         with:
           name: StampTool-macos
-          path: dist/StampTool-macos.zip
+          path: |
+            dist/StampTool-*-macos-*.dmg
+            dist/StampTool-*-macos-*.zip
           if-no-files-found: error
 
   release:
@@ -109,11 +141,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+      - name: List release assets
+        run: ls -la artifacts/
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
-          generate_release_notes: true
+          body_path: .github/release-notes.md
+
