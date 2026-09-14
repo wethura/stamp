@@ -148,7 +148,9 @@ class TestConversion(unittest.TestCase):
         self.assertEqual(ctx.exception.kind, "convert")
 
     def test_timeout_raises_classified_error(self):
-        svc = self._service(StubEngine("a", delay=0.8))
+        # 引擎耗时须明显超过 timeout+0.5s 的迟到判定阈值，
+        # 否则受平台 sleep 粒度影响在阈值边界抖动（Windows 曾复现）
+        svc = self._service(StubEngine("a", delay=1.5))
         with self.assertRaises(ConversionError) as ctx:
             svc.convert(self.source, self.work_dir, timeout_s=0.3)
         self.assertEqual(ctx.exception.kind, "timeout")
