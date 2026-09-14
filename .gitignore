@@ -9,3 +9,5 @@ openspec
 CLAUDE.md
 
 .DS_Store
+# word probe evidence artifacts
+scripts/word_probe/out/
