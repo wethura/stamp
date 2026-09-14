@@ -363,7 +363,7 @@ class PreviewCanvas(ctk.CTkFrame):
             width=max(180, canvas_w - 40), justify="center",
         )
         self.canvas.create_text(
-            cx, title_y + 76, text="PDF   /   图片   /   Excel",
+            cx, title_y + 76, text="PDF   /   图片   /   Excel   /   Word",
             fill=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
         )
         if not compact:
