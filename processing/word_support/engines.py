@@ -2,8 +2,11 @@
 
 与 scripts/word_probe 的探测实现同源；产品化差异：
 - convert 返回统一的 dict 结果（ok / error_kind / error_detail / pdf_path）
-- 支持 cancel_event（soffice 为本任务子进程可终止；Word 只放弃结果）
+- 支持 cancel_event（soffice 为本任务子进程可终止；COM 调用中途不可中断，
+  自启实例由 watchdog 兜底退出，共享实例仅放弃结果）
 - word-jxa 保留 MER 清退、分阶段限时与容器暂存策略（P0 实测根因）
+- Windows：Word / WPS 走 COM（spec P0.2：Word Word.Application；WPS
+  kwps.application，接口与 Word 同源，ExportAsFixedFormat 导出 PDF）
 """
 import json
 import os
@@ -11,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,6 +66,8 @@ class SofficeEngine:
     _CANDIDATES = (
         "/Applications/LibreOffice.app/Contents/MacOS/soffice",
         "/usr/bin/soffice",
+        "C:/Program Files/LibreOffice/program/soffice.exe",
+        "C:/Program Files (x86)/LibreOffice/program/soffice.exe",
         "soffice",
     )
 
@@ -371,4 +377,148 @@ class WpsManualEngine:
                        "已检测到 WPS，当前版本暂不能自动转换。请在 WPS 中导出 PDF 后拖入本工具。")
 
 
-DEFAULT_ENGINES = (SofficeEngine(), WordJxaEngine(), WpsManualEngine())
+class ComEngineBase:
+    """Windows COM 自动化基类：Word 与 WPS 共用（WPS 实现同源接口）。
+
+    进程归属（spec 安全条款）：优先 DispatchEx 启动独立实例（本任务私有，
+    可 Quit + watchdog 兜底）；仅当无法新建实例时才附着已运行实例
+    （GetActiveObject），此时永不 Quit、超时只放弃结果。
+    COM 调用中途不可中断；取消在调用间隙生效。
+    """
+
+    ENGINE_ID = ""
+    NAME = ""
+    PROG_IDS = ()
+    WD_FORMAT_PDF = 17  # wdFormatPDF / wdExportFormatPDF
+
+    # 可注入点（测试在非 Windows 平台桩掉这些方法）
+    def _is_windows(self) -> bool:
+        return sys.platform == "win32"
+
+    def _load_com_modules(self):
+        import pythoncom
+        import win32com.client
+        return pythoncom, win32com.client
+
+    def _registry_has(self, prog_id: str) -> bool:
+        import winreg
+        try:
+            winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id)
+            return True
+        except OSError:
+            return False
+
+    def _probe_version(self, prog_id: str) -> str:
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id + r"\CurVer") as key:
+                return winreg.QueryValueEx(key, "")[0]
+        except OSError:
+            return ""
+
+    @property
+    def engine_id(self) -> str:
+        return self.ENGINE_ID
+
+    def _first_registered(self) -> Optional[str]:
+        return next((pid for pid in self.PROG_IDS if self._registry_has(pid)), None)
+
+    def probe(self) -> EngineInfo:
+        if not self._is_windows():
+            return EngineInfo(self.ENGINE_ID, self.NAME, False, detail="仅 Windows 可用")
+        prog_id = self._first_registered()
+        if prog_id is None:
+            return EngineInfo(self.ENGINE_ID, self.NAME, False, detail="未检测到已安装")
+        return EngineInfo(self.ENGINE_ID, self.NAME, True,
+                          version=self._probe_version(prog_id),
+                          detail=f"COM {prog_id}")
+
+    def convert(self, work_copy: Path, out_pdf: Path,
+                timeout_s: float = DEFAULT_TIMEOUT_S, cancel_event=None) -> dict:
+        if not self._is_windows():
+            return _result(False, KIND_ENGINE_MISSING, "仅 Windows 可用")
+        if cancel_event is not None and cancel_event.is_set():
+            return _result(False, KIND_CANCELLED, "已取消")
+        prog_id = self._first_registered()
+        if prog_id is None:
+            return _result(False, KIND_ENGINE_MISSING, "未检测到已安装的 " + self.NAME)
+        try:
+            pythoncom, client = self._load_com_modules()
+        except ImportError as exc:
+            return _result(False, KIND_ENGINE_MISSING,
+                           f"缺少 pywin32 组件（{exc}），无法调用 {self.NAME}")
+
+        app = None
+        doc = None
+        we_launched = True
+        watchdog = None
+        try:
+            pythoncom.CoInitialize()
+            try:
+                app = client.GetActiveObject(prog_id)
+                we_launched = False  # 附着用户实例：永不 Quit
+            except Exception:  # noqa: BLE001
+                app = client.DispatchEx(prog_id)
+            try:
+                app.Visible = False
+                app.DisplayAlerts = 0
+            except Exception:  # noqa: BLE001  WPS 部分属性可能不支持
+                pass
+
+            if we_launched:
+                # COM 阻塞调用无法响应取消；独立实例超时后强制退出防挂死
+                watchdog = threading.Timer(
+                    timeout_s + 10,
+                    lambda: _safe_call(app.Quit))
+                watchdog.daemon = True
+                watchdog.start()
+
+            doc = app.Documents.Open(str(work_copy), ReadOnly=True,
+                                     AddToRecentFiles=False)
+            try:
+                doc.ExportAsFixedFormat(str(out_pdf), self.WD_FORMAT_PDF)
+            except Exception:  # noqa: BLE001  老版本/WPS 回退到 SaveAs2
+                doc.SaveAs2(str(out_pdf), FileFormat=self.WD_FORMAT_PDF)
+
+            if cancel_event is not None and cancel_event.is_set():
+                return _result(False, KIND_CANCELLED, "已取消（丢弃迟到结果）")
+            if not out_pdf.exists():
+                return _result(False, KIND_CONVERT,
+                               f"{self.NAME} 未生成 PDF（可能存在待处理的弹窗或文档受保护）")
+            return _result(True, pdf_path=str(out_pdf))
+        except Exception as exc:  # noqa: BLE001
+            return _result(False, KIND_CONVERT, f"COM 转换失败: {exc}")
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+            _safe_call(lambda: doc.Close(False))
+            if app is not None and we_launched:
+                _safe_call(app.Quit)
+            _safe_call(pythoncom.CoUninitialize)
+
+
+class WordComEngine(ComEngineBase):
+    ENGINE_ID = "word-com"
+    NAME = "Microsoft Word"
+    PROG_IDS = ("Word.Application", "Word.Application.16", "Word.Application.15")
+
+
+class WpsComEngine(ComEngineBase):
+    # 个人版注册 wps.application / KWPS.Application；企业版 kwps.application
+    ENGINE_ID = "wps-com"
+    NAME = "WPS Office"
+    PROG_IDS = ("kwps.application", "KWPS.Application",
+                "wps.application", "WPS.Application")
+
+
+def _safe_call(fn):
+    try:
+        fn()
+    except Exception:  # noqa: BLE001  清理路径尽力而为
+        pass
+
+
+if sys.platform == "win32":
+    DEFAULT_ENGINES = (SofficeEngine(), WordComEngine(), WpsComEngine())
+else:
+    DEFAULT_ENGINES = (SofficeEngine(), WordJxaEngine(), WpsManualEngine())

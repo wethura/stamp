@@ -30,7 +30,8 @@ corrupt 样本的教训已固化为设计约束：**进入任何引擎前，先�
 
 | 日期 | OS | 引擎 | 结论 | 备注 |
 |---|---|---|---|---|
-| — | 未验证 | Word COM / WPS COM | **未验证** | spec P0.2 待有 Windows 环境时执行 |
+| 2026-09-14 | — | Word COM（`Word.Application`）/ WPS COM（`kwps.application` 等）/ LibreOffice | **已实现，待实机验证** | 引擎与进程归属规则按 spec P0.2 实现（DispatchEx 独立实例 + watchdog、附着实例永不 Quit、ExportAsFixedFormat→SaveAs2 回退、注册表 ProgID 探测）；8 项假 COM 桩测试通过（含进程归属与回退路径）。真实 Windows + Office/WPS 环境的转换验证未做，待 P0.2/P3 实机执行 |
+| 2026-09-14 | CI windows-latest | 打包（PyInstaller + pywin32 hiddenimports） | **CI 自动化** | GitHub Actions：双平台单测 + exe/二进制构建 + 产物上传 + tag 发布；绿色 ≠ 实机可用，GUI/COM 运行验收仍属 P3 |
 
 ## Linux
 

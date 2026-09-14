@@ -7,6 +7,11 @@ hiddenimports = []
 tmp_ret = collect_all('pymupdf')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
+# Word/WPS COM 引擎在函数内延迟导入（win32com），静态分析不可见
+tmp_ret = collect_all('win32com')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+hiddenimports += ['pythoncom', 'win32com.client', 'pywintypes', 'win32timezone']
+
 
 a = Analysis(
     ['main.py'],
