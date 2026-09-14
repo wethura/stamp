@@ -4,6 +4,7 @@ import base64
 import os
 import tempfile
 from dataclasses import dataclass, asdict
+from itertools import count
 from typing import List, Optional
 from datetime import datetime
 from PIL import Image
@@ -34,6 +35,7 @@ class StampManager:
         self.config_dir = config_dir
         self.data_file = os.path.join(config_dir, "stamps.json")
         self._stamps: List[StampData] = []
+        self._id_seq = count(1)
         self._load()
 
     def _load(self):
@@ -72,7 +74,8 @@ class StampManager:
 
     def add_stamp(self, name: str, img: Image.Image) -> StampData:
         """添加新章模板"""
-        stamp_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        # 与 StampInstanceManager 相同：低时钟分辨率平台连续添加会撞 id
+        stamp_id = f"{datetime.now().strftime('%Y%m%d%H%M%S%f')}-{next(self._id_seq)}"
 
         buf = io.BytesIO()
         img.save(buf, format="PNG")
