@@ -11,14 +11,15 @@ from PIL import Image
 
 from processing.base import DocumentHandler
 from processing.handlers.pdf_handler import PDFHandler
-from processing.word_support.service import ConversionService
+from processing.word_support.service import ConversionService, get_shared_service
 
 
 class WordHandler(DocumentHandler):
     """DOCX 输入、PDF 输出的处理器（spec：可编辑 DOCX 输出不在范围）。"""
 
     def __init__(self, service: ConversionService = None):
-        self.service = service or ConversionService()
+        # 默认共享单例：与设置对话框共用探测缓存与引擎偏好
+        self.service = service or get_shared_service()
         self._pdf: PDFHandler = None
         self._workspace: str = None
         self._source: str = None

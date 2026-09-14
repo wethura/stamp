@@ -87,9 +87,13 @@ class ConversionService:
         try:
             with open(self.preference_path, "r", encoding="utf-8") as f:
                 engine_id = json.load(f).get("engine_id")
-            return engine_id if isinstance(engine_id, str) else None
+            return engine_id if isinstance(engine_id, str) and engine_id else None
         except (OSError, ValueError):
             return None
+
+    def current_preference(self) -> Optional[str]:
+        """用户保存的首选引擎 id；None 表示「自动」。"""
+        return self._load_preference()
 
     def save_preference(self, engine_id: str):
         with self._pref_lock:
@@ -101,6 +105,14 @@ class ConversionService:
                 os.replace(tmp, self.preference_path)
             except OSError:
                 pass  # 偏好记忆失败不阻断转换
+
+    def clear_preference(self):
+        """恢复「自动」：按检测顺序使用第一个可用引擎。"""
+        with self._pref_lock:
+            try:
+                os.remove(self.preference_path)
+            except OSError:
+                pass
 
     def pick_engine(self, refresh: bool = False) -> Optional[EngineInfo]:
         infos = {info.engine_id: info for info in self.available_engines(refresh)}
@@ -183,3 +195,15 @@ class ConversionService:
                                  engine_id=engine.engine_id,
                                  elapsed_s=round(elapsed, 2),
                                  page_count=page_count)
+
+
+# 进程级共享实例：设置对话框与每次新建的 WordHandler 共用探测缓存与偏好，
+# 避免“设置里改了引擎、下次打开文档仍用旧的”这类不一致。
+_SHARED_SERVICE: Optional["ConversionService"] = None
+
+
+def get_shared_service() -> "ConversionService":
+    global _SHARED_SERVICE
+    if _SHARED_SERVICE is None:
+        _SHARED_SERVICE = ConversionService()
+    return _SHARED_SERVICE

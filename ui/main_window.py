@@ -63,6 +63,13 @@ class MainWindow(ctk.CTkFrame):
             font=(Fonts.FAMILY, Fonts.BODY_SIZE),
             command=self.controller.open_document,
         ).pack(side="right")
+        ctk.CTkButton(
+            toolbar, text="⚙  设置", width=88, height=40,
+            corner_radius=8, fg_color="transparent",
+            hover_color=Colors.SURFACE_RAISED, text_color=Colors.TEXT_SECONDARY,
+            font=(Fonts.FAMILY, Fonts.BODY_SIZE),
+            command=self.controller.open_settings,
+        ).pack(side="right", padx=(0, 4))
 
         # ── Content area ───────────────────────────────────────────
         content = ctk.CTkFrame(self, fg_color="transparent")

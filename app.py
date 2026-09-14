@@ -16,6 +16,7 @@ from processing.stamp_manager import StampManager
 from processing.stamp_instance import StampInstance, StampInstanceManager
 from processing.stamp import apply_opacity
 from processing.word_support.errors import ConversionError
+from processing.word_support.service import get_shared_service
 from ui.word_dialogs import ConversionProgressDialog, choose_engine
 
 
@@ -34,6 +35,11 @@ class App:
         self.window = None
 
     # --- Document ---
+
+    def open_settings(self):
+        """打开系统设置（当前提供 Word 转换引擎选择）。"""
+        from ui.settings_dialog import open_settings as open_dialog
+        open_dialog(self.window, get_shared_service())
 
     def open_document(self):
         filters = HandlerRegistry.get_file_filters()
@@ -135,7 +141,7 @@ class App:
                     "请安装 LibreOffice，或在 Word/WPS 中将文件导出为 PDF 后拖入本工具。")
             return
 
-        preferred = service._load_preference()
+        preferred = service.current_preference()
         valid_ids = [info.engine_id for info in engines]
         if handler.engine_id is None and len(engines) > 1 and preferred not in valid_ids:
             chosen = choose_engine(self.window, engines, preferred)

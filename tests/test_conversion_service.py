@@ -190,3 +190,47 @@ class TestConversion(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPreferenceAutoBehavior(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.source = self.root / "in.docx"
+        make_docx(self.source)
+
+    def _service(self, engines):
+        return ConversionService(
+            engines=engines,
+            preference_path=str(self.root / "pref.json"))
+
+    def test_clear_preference_falls_back_to_first_available(self):
+        svc = self._service([StubEngine("a"), StubEngine("b")])
+        svc.save_preference("b")
+        self.assertEqual(svc.pick_engine().engine_id, "b")
+        svc.clear_preference()
+        self.assertIsNone(svc.current_preference())
+        self.assertEqual(svc.pick_engine().engine_id, "a")
+
+    def test_current_preference_reflects_saved_value(self):
+        svc = self._service([StubEngine("a"), StubEngine("b")])
+        self.assertIsNone(svc.current_preference())
+        svc.save_preference("a")
+        self.assertEqual(svc.current_preference(), "a")
+
+    def test_empty_preference_treated_as_auto(self):
+        pref = self.root / "pref.json"
+        pref.write_text('{"engine_id": ""}', encoding="utf-8")
+        svc = self._service([StubEngine("a"), StubEngine("b")])
+        self.assertIsNone(svc.current_preference())
+        self.assertEqual(svc.pick_engine().engine_id, "a")
+
+    def test_shared_service_singleton(self):
+        from processing.word_support import service as svc_module
+        first = svc_module.get_shared_service()
+        second = svc_module.get_shared_service()
+        self.assertIs(first, second)
+        # 单例与 WordHandler 默认服务一致（设置与加载共用偏好）
+        from processing.handlers.word_handler import WordHandler
+        self.assertIs(WordHandler().service, first)
