@@ -1,5 +1,6 @@
 """Application controller — bridges UI and processing layers."""
 
+import threading
 from tkinter import filedialog, messagebox
 from PIL import Image
 from typing import Optional, List, Dict
@@ -9,10 +10,13 @@ import shutil
 
 from processing import HandlerRegistry
 from processing.base import DocumentHandler
+from processing.handlers.pdf_handler import PDFHandler
+from processing.handlers.word_handler import WordHandler
 from processing.stamp_manager import StampManager
 from processing.stamp_instance import StampInstance, StampInstanceManager
 from processing.stamp import apply_opacity
-from processing.handlers.pdf_handler import PDFHandler
+from processing.word_support.errors import ConversionError
+from ui.word_dialogs import ConversionProgressDialog, choose_engine
 
 
 class App:
@@ -78,28 +82,121 @@ class App:
         self._load_document(path, handler)
 
     def _load_document(self, path: str, handler):
+        if isinstance(handler, WordHandler):
+            self._load_word_document(path, handler)
+            return
         try:
             if self.handler is not None:
                 self.handler.close()
 
             handler.load(path)
-            self.handler = handler
-            self.doc_path = path
-
-            self.pages = []
-            for i in range(handler.page_count()):
-                self.pages.append(handler.render_page(i))
-
-            self.instance_manager = StampInstanceManager(path)
-            self.active_page = 0
-            self._selected_instance_id = None
-
-            self.window.controls.set_instance_manager(self.instance_manager)
-            self.window.preview.reset_view()
-            self.window.set_status(f"已加载: {path}  ({len(self.pages)} 页)")
-            self._refresh_preview()
+            pages = [handler.render_page(i) for i in range(handler.page_count())]
+            self._activate_document(path, handler, pages)
         except Exception as e:
             messagebox.showerror("加载失败", str(e))
+
+    def _activate_document(self, path: str, handler, pages: List[Image.Image]):
+        """Switch the session to a freshly loaded document (UI thread only)."""
+        if self.handler is not None and self.handler is not handler:
+            self.handler.close()
+
+        self.handler = handler
+        self.doc_path = path
+        self.pages = pages
+
+        self.instance_manager = StampInstanceManager(path)
+        self.active_page = 0
+        self._selected_instance_id = None
+
+        self.window.controls.set_instance_manager(self.instance_manager)
+        self.window.preview.reset_view()
+        self.window.set_status(f"已加载: {path}  ({len(pages)} 页)")
+        self._refresh_preview()
+
+    # --- Word 转换（P2.3/P2.4：后台转换 + 取消 + 引擎选择 + 手动 PDF）---
+
+    def _load_word_document(self, path: str, handler: WordHandler):
+        service = handler.service
+        engines = service.available_engines(refresh=True)
+
+        if not engines:
+            handler.close()
+            has_manual = any(info.available and info.manual_path_only
+                             for info in service.probe_all().values())
+            if has_manual and messagebox.askyesno(
+                    "WPS 暂不能自动转换",
+                    "已检测到 WPS，当前版本暂不能自动转换。\n"
+                    "是否改为手动导入已导出的 PDF？"):
+                self._manual_pdf_import()
+            else:
+                messagebox.showwarning(
+                    "无法打开 Word 文档",
+                    "未找到可用的 Word 转换引擎。\n"
+                    "请安装 LibreOffice，或在 Word/WPS 中将文件导出为 PDF 后拖入本工具。")
+            return
+
+        preferred = service._load_preference()
+        valid_ids = [info.engine_id for info in engines]
+        if handler.engine_id is None and len(engines) > 1 and preferred not in valid_ids:
+            chosen = choose_engine(self.window, engines, preferred)
+            if chosen is None:
+                return  # 用户取消选择，不打开
+            handler.engine_id = chosen
+            service.save_preference(chosen)
+        elif handler.engine_id is None:
+            handler.engine_id = engines[0].engine_id
+
+        cancel_event = threading.Event()
+        handler.cancel_event = cancel_event
+        dialog = ConversionProgressDialog(
+            self.window, lambda: cancel_event.set())
+        self.window.update()
+
+        def worker():
+            try:
+                handler.load(path)
+                pages = [handler.render_page(i) for i in range(handler.page_count())]
+                error = None
+            except ConversionError as exc:
+                pages, error = None, exc
+            except Exception as exc:  # noqa: BLE001
+                pages, error = None, ConversionError("convert", str(exc))
+            root = self.window.winfo_toplevel()
+            root.after(0, self._word_load_finished,
+                       path, handler, pages, dialog, error)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _word_load_finished(self, path, handler, pages, dialog, error):
+        dialog.close()
+        if error is None:
+            self._activate_document(path, handler, pages)
+            engine_note = ""
+            if handler.last_engine_info is not None:
+                engine_note = f"  ·  引擎: {handler.last_engine_info.name}"
+            self.window.set_status(
+                f"已加载: {path}  ({len(pages)} 页){engine_note}  ·  导出将为 PDF")
+            return
+
+        handler.close()
+        if getattr(error, "kind", None) == "cancelled":
+            self.window.set_status("已取消转换，原文档保持不变")
+            return
+
+        self.window.set_status("Word 转换失败")
+        if messagebox.askyesno("转换失败", f"{error}\n\n是否手动导入已导出的 PDF？"):
+            self._manual_pdf_import()
+
+    def _manual_pdf_import(self):
+        path = filedialog.askopenfilename(
+            title="导入 PDF",
+            filetypes=[("PDF 文件", "*.pdf *.PDF")],
+        )
+        if not path:
+            return
+        handler = HandlerRegistry.get_handler(path)
+        if handler is not None:
+            self._load_document(path, handler)
 
     # --- Instance Management ---
 
