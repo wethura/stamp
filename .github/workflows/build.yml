@@ -72,17 +72,20 @@ jobs:
         run: |
           # 用户报告：进程活着但主窗口不可见。此门禁在真实会话中
           # 启动 exe（无 selftest），断言主窗口句柄非零。
+          # 注意：onefile 是「引导进程 + 子进程」结构，窗口属于子进程，
+          # 必须扫描同名进程树，检查启动进程本身会永远拿到 0。
           function Assert-WindowVisible([string]$Scenario) {
-            $proc = Start-Process -FilePath "dist\StampTool.exe" -PassThru
+            $launched = Start-Process -FilePath "dist\StampTool.exe" -PassThru
             $visible = $false
-            for ($i = 0; $i -lt 40; $i++) {
-              Start-Sleep -Milliseconds 500
-              $p = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
-              if ($p -and $p.MainWindowHandle -ne 0) { $visible = $true; break }
-              if (-not $p) { break }
-            }
             $title = ""
-            if ($visible) { $title = (Get-Process -Id $proc.Id).MainWindowTitle }
+            $deadline = (Get-Date).AddSeconds(25)
+            while ((Get-Date) -lt $deadline) {
+              Start-Sleep -Milliseconds 500
+              $tree = Get-Process -Name StampTool -ErrorAction SilentlyContinue
+              if (-not $tree) { break }   # 进程退出：同样视为不可见
+              $owner = $tree | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+              if ($owner) { $visible = $true; $title = $owner.MainWindowTitle; break }
+            }
             if (-not $visible) {
               "--- $Scenario FAILED; startup log: ---"
               $logLines = Get-Content "$env:USERPROFILE\.stamp_tool\logs\stamp_tool.log" -ErrorAction SilentlyContinue | Select-Object -Last 40
@@ -91,13 +94,12 @@ jobs:
               $logLines | Where-Object { $_ -match "窗口|可见|ERROR|CRITICAL|启动|WARNING" } | ForEach-Object {
                 echo "::error::[$Scenario] $_"
               }
-              echo "::error::[$Scenario] MainWindowHandle stayed 0 for 20s"
-              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              echo "::error::[$Scenario] no visible window in StampTool process tree for 25s"
               throw "$Scenario : main window never became visible"
             }
-            "$Scenario OK: window '$title'"
-            Stop-Process -Id $proc.Id -Force
-            Start-Sleep -Milliseconds 500
+            "$Scenario OK: window '$title' (pid $($owner.Id))"
+            Stop-Process -Name StampTool -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 800
           }
 
           # 场景 1：全新环境
