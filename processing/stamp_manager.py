@@ -39,19 +39,22 @@ class StampManager:
         self._load()
 
     def _load(self):
-        """从文件加载章数据"""
+        """从文件加载章数据（任何损坏都降级为空库，不得阻断启动）"""
         if not os.path.exists(self.data_file):
             self._stamps = []
             return
         try:
             with open(self.data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                valid_fields = {'id', 'name', 'image_base64', 'created_at'}
-                self._stamps = []
-                for item in data:
+            valid_fields = {'id', 'name', 'image_base64', 'created_at'}
+            self._stamps = []
+            for item in data:
+                try:
                     filtered = {k: v for k, v in item.items() if k in valid_fields}
                     self._stamps.append(StampData(**filtered))
-        except (json.JSONDecodeError, KeyError):
+                except Exception:  # noqa: BLE001  单条损坏只丢弃该条
+                    continue
+        except Exception:  # noqa: BLE001  整体损坏（旧版本崩溃残留等）→ 空库
             self._stamps = []
 
     def _save(self):

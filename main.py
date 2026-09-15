@@ -11,6 +11,26 @@ import customtkinter as ctk
 LOG_FILE_NAME = "stamp_tool.log"
 
 
+class _LogWriter:
+    """把 write 导向日志（供 windowed exe 中 stdout/stderr 为 None 时顶替）。"""
+
+    def __init__(self, level):
+        self._level = level
+        self._buf = ""
+
+    def write(self, text):
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            if line.strip():
+                logging.log(self._level, line)
+
+    def flush(self):
+        if self._buf.strip():
+            logging.log(self._level, self._buf)
+            self._buf = ""
+
+
 def _setup_logging() -> Path:
     """打包版没有控制台：所有日志与未捕获异常落盘，便于用户反馈问题。"""
     log_dir = Path.home() / ".stamp_tool" / "logs"
@@ -26,6 +46,12 @@ def _setup_logging() -> Path:
         )
     except OSError:
         logging.basicConfig(level=logging.INFO)
+    # windowed exe 的 stdout/stderr 是 None：三方库 print 会产生
+    # 不可预知行为；重定向到日志，顺便多一份线索
+    if sys.stdout is None:
+        sys.stdout = _LogWriter(logging.INFO)
+    if sys.stderr is None:
+        sys.stderr = _LogWriter(logging.ERROR)
     return log_path
 
 
@@ -241,6 +267,84 @@ def create_app_controller():
     return App()
 
 
+def _install_tk_callback_logging(root):
+    """Tkinter 回调异常在 windowed exe 里默认打到 None stderr——被静默吞掉。
+
+    重定向到日志，补上这个观察黑洞（sys.excepthook 只覆盖主流程，
+    覆盖不到 Tk 事件/after 回调）。
+    """
+    def report(exc_type, exc, tb, *_args):
+        logging.critical("Tk 回调异常", exc_info=(exc_type, exc, tb))
+        try:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "程序遇到问题",
+                f"{exc_type.__name__}: {exc}\n\n详细信息已记录到日志。")
+            import logging as _l
+            _l.getLogger(__name__).info(
+                "日志位置见启动记录或 ~/.stamp_tool/logs/stamp_tool.log")
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        root.report_callback_exception = report
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _guard_window_visibility(root, attempts: int = 3):
+    """主窗口可见性看门狗：若 deiconify 后窗口仍不可见，强制拉起并记日志。
+
+    Windows 上曾出现主循环在跑、进程活着、窗口却不可见的情况
+    （用户报告「加载完成后消失」）。看门狗会重试 deiconify/lift/
+    topmost 抖动——多数隐形场景可被直接救回；救不回也有日志证据。
+    """
+    import time
+
+    def check(attempt):
+        try:
+            viewable = bool(root.winfo_viewable())
+            logging.info("窗口可见性检查 %d/%d: viewable=%s geometry=%s",
+                         attempt, attempts, viewable, root.geometry())
+            if viewable:
+                return
+            if attempt >= attempts:
+                logging.error("主窗口在 %d 次强制拉起后仍不可见", attempts)
+                return
+            logging.warning("主窗口不可见，尝试强制拉起（第 %d 次）", attempt)
+            root.deiconify()
+            root.lift()
+            root.attributes("-topmost", True)
+            root.after(200, lambda: root.attributes("-topmost", False))
+        except Exception:  # noqa: BLE001
+            logging.exception("可见性检查失败")
+            return
+        root.after(900, lambda: check(attempt + 1))
+
+    root.after(700, lambda: check(1))
+
+
+def _show_main_window(root, window, app_controller):
+    """显示主窗并加载印章库：先显示再加载数据，加载再慢也不「黑屏」。
+
+    旧顺序在 splash 关闭后先同步加载印章库再 deiconify——库大/损坏时
+    应用处于「零可见窗口」状态，正是「加载完成后消失」的形态。
+    """
+    root.deiconify()
+    root.lift()
+    _guard_window_visibility(root)
+
+    try:
+        app_controller.window = window
+        window.set_status("正在加载印章库…")
+        root.update_idletasks()
+        window.controls.set_stamp_manager(app_controller.stamp_manager)
+    except Exception:  # noqa: BLE001  印章库损坏不得阻断主界面
+        logging.exception("印章库加载失败（已跳过）")
+    finally:
+        window.set_status("就绪 · 打开文档后，双击右侧印章即可添加")
+
+
 def main():
     log_path = _setup_logging()
     _install_excepthook(log_path)
@@ -252,6 +356,7 @@ def main():
 
     root = ctk.CTk()
     root.withdraw()
+    _install_tk_callback_logging(root)
 
     # ── Splash screen ─────────────────────────────────────────────
     from ui.splash_screen import SplashScreen
@@ -271,15 +376,15 @@ def main():
     splash.update_progress(80, "正在初始化章管理器...")
     splash.update_progress(100, "加载完成!")
 
-    # ── Close splash, show main window ────────────────────────────
+    # ── Close splash, build + show main window ────────────────────
     splash.close()
 
     from ui.main_window import MainWindow
     window = MainWindow(root, app_controller)
-    app_controller.window = window
-    window.controls.set_stamp_manager(app_controller.stamp_manager)
+    logging.info("主窗口构建完成")
 
-    root.deiconify()
+    _show_main_window(root, window, app_controller)
+    logging.info("主窗口已显示，进入主循环")
 
     if os.environ.get("STAMPTOOL_SELFTEST"):
         _run_selftest(root)

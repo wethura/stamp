@@ -61,12 +61,49 @@ jobs:
         run: |
           if (-Not (Test-Path "dist/StampTool.exe")) { throw "StampTool.exe not produced" }
           "{0:N0} bytes" -f (Get-Item "dist/StampTool.exe").Length
-          # 自检：窗口真正映射才通过（导入链/资源缺失都会失败）
+          # 自检：窗口布局 + 核心链路 + 引擎探测（导入/资源缺失都会失败）
           $env:STAMPTOOL_SELFTEST = "full"
           $proc = Start-Process -FilePath "dist\StampTool.exe" -PassThru
           if (-not $proc.WaitForExit(90000)) { $proc.Kill(); throw "selftest timed out" }
           if ($proc.ExitCode -ne 0) { throw "selftest failed (exit $($proc.ExitCode))" }
-          "selftest passed: window mapped"
+          "selftest passed: full mode"
+      - name: Real-launch visibility gate (fresh + corrupted state)
+        shell: pwsh
+        run: |
+          # 用户报告：进程活着但主窗口不可见。此门禁在真实会话中
+          # 启动 exe（无 selftest），断言主窗口句柄非零。
+          function Assert-WindowVisible([string]$Scenario) {
+            $proc = Start-Process -FilePath "dist\StampTool.exe" -PassThru
+            $visible = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Milliseconds 500
+              $p = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+              if ($p -and $p.MainWindowHandle -ne 0) { $visible = $true; break }
+              if (-not $p) { break }
+            }
+            $title = ""
+            if ($visible) { $title = (Get-Process -Id $proc.Id).MainWindowTitle }
+            if (-not $visible) {
+              "--- $Scenario FAILED; startup log: ---"
+              Get-Content "$env:USERPROFILE\.stamp_tool\logs\stamp_tool.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              throw "$Scenario : main window never became visible"
+            }
+            "$Scenario OK: window '$title'"
+            Stop-Process -Id $proc.Id -Force
+            Start-Sleep -Milliseconds 500
+          }
+
+          # 场景 1：全新环境
+          Remove-Item -Recurse -Force "$env:USERPROFILE\.stamp_tool" -ErrorAction SilentlyContinue
+          Assert-WindowVisible "fresh-profile"
+
+          # 场景 2：旧版本残留的损坏印章库（不得挡住主窗口）
+          New-Item -ItemType Directory -Force "$env:USERPROFILE\.stamp_tool" | Out-Null
+          Set-Content "$env:USERPROFILE\.stamp_tool\stamps.json" '["corrupt-entry", {"id": 123}, "junk"]'
+          Assert-WindowVisible "corrupted-stamp-library"
+
+          Remove-Item -Recurse -Force "$env:USERPROFILE\.stamp_tool" -ErrorAction SilentlyContinue
       - name: Package zip
         shell: pwsh
         run: |
