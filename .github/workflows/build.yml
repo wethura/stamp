@@ -85,7 +85,13 @@ jobs:
             if ($visible) { $title = (Get-Process -Id $proc.Id).MainWindowTitle }
             if (-not $visible) {
               "--- $Scenario FAILED; startup log: ---"
-              Get-Content "$env:USERPROFILE\.stamp_tool\logs\stamp_tool.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
+              $logLines = Get-Content "$env:USERPROFILE\.stamp_tool\logs\stamp_tool.log" -ErrorAction SilentlyContinue | Select-Object -Last 40
+              $logLines | ForEach-Object { Write-Host $_ }
+              # 关键诊断行同时输出为注解（公开 API 可读，便于排障）
+              $logLines | Where-Object { $_ -match "窗口|可见|ERROR|CRITICAL|启动|WARNING" } | ForEach-Object {
+                echo "::error::[$Scenario] $_"
+              }
+              echo "::error::[$Scenario] MainWindowHandle stayed 0 for 20s"
               Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
               throw "$Scenario : main window never became visible"
             }
