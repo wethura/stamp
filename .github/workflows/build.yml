@@ -35,6 +35,18 @@ jobs:
             exit 1
           fi
 
+      - name: Full selftest (source mode)
+        shell: bash
+        run: |
+          STAMPTOOL_SELFTEST=full python main.py 2>&1 | tee selftest.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            tail -25 selftest.log | while IFS= read -r line; do
+              echo "::error::src-selftest: $line"
+            done
+            exit 1
+          fi
+
   build-windows:
     name: build windows exe
     runs-on: windows-latest
@@ -62,23 +74,20 @@ jobs:
           if (-Not (Test-Path "dist/StampTool.exe")) { throw "StampTool.exe not produced" }
           "{0:N0} bytes" -f (Get-Item "dist/StampTool.exe").Length
           # 自检：窗口布局 + 核心链路 + 引擎探测（导入/资源缺失都会失败）
+          # 用 cmd 重定向兜底（onefile 引导进程 + 子进程结构）
           $env:STAMPTOOL_SELFTEST = "full"
-          $out = "$env:TEMP\selftest.out"
-          $proc = Start-Process -FilePath "dist\StampTool.exe" -PassThru `
-            -RedirectStandardOutput $out -RedirectStandardError "$env:TEMP\selftest.err"
-          if (-not $proc.WaitForExit(90000)) {
-            $proc.Kill()
-            Get-Content $out, "$env:TEMP\selftest.err" -ErrorAction SilentlyContinue
-            throw "selftest timed out"
-          }
-          $lines = Get-Content $out, "$env:TEMP\selftest.err" -ErrorAction SilentlyContinue
+          cmd /c "dist\StampTool.exe > %TEMP%\selftest.out 2> %TEMP%\selftest.err & echo EXIT:%ERRORLEVEL% > %TEMP%\selftest.code"
+          $code = (Get-Content "$env:TEMP\selftest.code" -ErrorAction SilentlyContinue) -replace "EXIT:",""
+          $lines = @(Get-Content "$env:TEMP\selftest.out","$env:TEMP\selftest.err" -ErrorAction SilentlyContinue)
           $lines | ForEach-Object { Write-Host $_ }
-          if ($proc.ExitCode -ne 0) {
-            $lines | Where-Object { $_ -match "SELFTEST|Error|Traceback|Module" } | ForEach-Object {
-              echo "::error::selftest: $_"
+          "exit code: $code (output lines: $($lines.Count))"
+          if ("$code" -ne "0") {
+            if ($lines.Count -eq 0) {
+              echo "::error::selftest produced NO output (exit $code) — crashed before printing"
+            } else {
+              $lines | Select-Object -Last 25 | ForEach-Object { echo "::error::selftest: $_" }
             }
-            echo "::error::selftest failed (exit $($proc.ExitCode))"
-            throw "selftest failed (exit $($proc.ExitCode))"
+            throw "selftest failed (exit $code)"
           }
           "selftest passed: full mode"
       - name: Real-launch visibility gate (fresh + corrupted state)
