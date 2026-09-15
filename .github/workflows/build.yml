@@ -36,6 +36,7 @@ jobs:
           fi
 
       - name: Full selftest (source mode)
+        timeout-minutes: 10
         shell: bash
         run: |
           STAMPTOOL_SELFTEST=full python main.py 2>&1 | tee selftest.log
@@ -69,6 +70,7 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller -y StampTool-win.spec
       - name: Smoke-check exe (selftest)
+        timeout-minutes: 10
         shell: pwsh
         run: |
           if (-Not (Test-Path "dist/StampTool.exe")) { throw "StampTool.exe not produced" }
@@ -91,6 +93,7 @@ jobs:
           }
           "selftest passed: full mode"
       - name: Real-launch visibility gate (fresh + corrupted state)
+        timeout-minutes: 10
         shell: pwsh
         run: |
           # 用户报告：进程活着但主窗口不可见。此门禁在真实会话中
@@ -169,6 +172,7 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller -y StampTool.spec
       - name: Smoke-check app bundle (selftest)
+        timeout-minutes: 10
         run: |
           BIN=dist/StampTool.app/Contents/MacOS/StampTool
           test -x "$BIN" || { echo "::error::app bundle not produced"; exit 1; }

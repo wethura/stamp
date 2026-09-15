@@ -57,8 +57,13 @@ def _setup_logging() -> Path:
 
 def _install_excepthook(log_path: Path):
     """未捕获异常落盘并在下一次启动可见——闪退不再「不知道为什么」。"""
+    unattended = bool(os.environ.get("STAMPTOOL_SELFTEST"))
+
     def hook(exc_type, exc, tb):
         logging.critical("未捕获异常", exc_info=(exc_type, exc, tb))
+        if unattended:
+            # 自检/无人值守环境绝不能弹窗等待点击（会永久挂起进程）
+            return
         try:
             from tkinter import messagebox
             messagebox.showerror(
@@ -219,6 +224,23 @@ def _run_selftest(root, timeout_s: float = 25.0):
     mode = os.environ.get("STAMPTOOL_SELFTEST", "")
     deadline = time.monotonic() + timeout_s
 
+    def _selftest_exit(code: int):
+        """在 Tk 回调内可靠退出。
+
+        sys.exit 的 SystemExit 会穿过 mainloop 进入全局钩子——钩子弹的
+        messagebox 在无人值守环境（CI/打包自检）会永久阻塞。这里显式
+        收尾后直接终止进程。
+        """
+        try:
+            root.destroy()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            logging.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(code)
+
     def poll():
         try:
             mapped = bool(root.winfo_ismapped())
@@ -241,17 +263,17 @@ def _run_selftest(root, timeout_s: float = 25.0):
                     print("SELFTEST OK: docx pipeline "
                           "(precheck + convert + stamp + export)", flush=True)
                     _selftest_engine_probe()
-                root.destroy()
-                sys.exit(0)
+                _selftest_exit(0)
             if time.monotonic() > deadline:
                 print(f"SELFTEST FAIL: window never laid out — "
                       f"actual {width}x{height}, requested {req_w}x{req_h}, "
                       f"mapped={mapped}; packaging may be incomplete", flush=True)
-                root.destroy()
-                sys.exit(1)
+                _selftest_exit(1)
+        except SystemExit:
+            raise
         except Exception as exc:  # noqa: BLE001
             print(f"SELFTEST FAIL: {exc}", flush=True)
-            sys.exit(1)
+            _selftest_exit(1)
         root.after(400, poll)
 
     root.after(400, poll)
