@@ -44,16 +44,19 @@ class TestValidateTarget(TempStoreCase):
         super().setUp()
         self.root = self.tmp / "layout"
 
+    @unittest.skipIf(sys.platform == "win32", "win 布局由 Windows runner 覆盖")
     def test_windows_install_root_layout(self):
         root = self.root / "win-root"
         exe = make_soffice(root / "program")
         self.assertEqual(lo_paths.validate_soffice_target(root), exe)
 
+    @unittest.skipIf(sys.platform == "win32", "win 布局由 Windows runner 覆盖")
     def test_program_dir_selected_directly(self):
         root = self.root / "win-progdir"
         exe = make_soffice(root)
         self.assertEqual(lo_paths.validate_soffice_target(root), exe)
 
+    @unittest.skipIf(sys.platform != "darwin", "mac 布局由 macOS runner 覆盖")
     def test_mac_app_bundle_layout(self):
         app = self.root / "LibreOffice.app"
         exe = make_soffice(app / "Contents" / "MacOS")
@@ -103,19 +106,36 @@ class TestManualPersistence(TempStoreCase):
 
 class TestCandidates(unittest.TestCase):
     def test_windows_includes_per_user_location(self):
+        localappdata = "/Users/x/AppData/Local"
         with mock.patch.dict("os.environ",
-                             {"LOCALAPPDATA": "/Users/x/AppData/Local"},
-                             clear=False):
-            with mock.patch.object(sys, "platform", "win32"):
-                cands = [str(c) for c in lo_paths.candidate_paths()]
-        self.assertTrue(any("AppData/Local/Programs/LibreOffice" in c
-                            for c in cands),
-                        "每用户安装是默认形态之一，不得遗漏")
+                             {"LOCALAPPDATA": localappdata},
+                             clear=False), \
+                mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(lo_paths, "_windows_registry_roots",
+                                  return_value=[]):
+            cands = lo_paths.candidate_paths()
+        expected = (Path(localappdata) / "Programs" / "LibreOffice"
+                    / "program" / "soffice.exe")
+        self.assertIn(expected, cands,
+                      "每用户安装是默认形态之一，不得遗漏")
+
+    def test_windows_includes_registry_roots(self):
+        root = Path("D:/Custom/LibreOffice")
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(lo_paths, "_windows_registry_roots",
+                                  return_value=[root]), \
+                mock.patch.dict("os.environ", {"LOCALAPPDATA": "/x"},
+                                clear=False):
+            cands = lo_paths.candidate_paths()
+        self.assertIn(root / "program" / "soffice.exe", cands,
+                      "注册表 InstallLocation 覆盖自定义安装盘")
 
     def test_darwin_candidates_include_home_applications(self):
         with mock.patch.object(sys, "platform", "darwin"):
-            cands = [str(c) for c in lo_paths.candidate_paths()]
-        self.assertTrue(any("Applications" in c for c in cands))
+            cands = lo_paths.candidate_paths()
+        self.assertTrue(any(p == (Path.home() / "Applications" /
+                                  "LibreOffice.app/Contents/MacOS/soffice")
+                            for p in cands))
 
 
 class TestEnginePriority(TempStoreCase):
@@ -167,9 +187,19 @@ class TestEnginePriority(TempStoreCase):
         with mock.patch.object(lo_paths, "candidate_paths",
                                return_value=[Path("/nope/soffice"),
                                              Path("/nada/soffice.exe")]), \
-                mock.patch("shutil.which", return_value=None):
-            with self.assertLogs("processing.word_support.paths", level="INFO") as logs:
-                self.assertIsNone(engine._find_bin())
+                mock.patch("shutil.which", return_value=None), \
+                mock.patch.object(lo_paths, "log_detection_scan",
+                                  wraps=lo_paths.log_detection_scan) as scan:
+            self.assertIsNone(engine._find_bin())
+        scan.assert_called_once()
+        args = scan.call_args[0]
+        self.assertEqual(args[2], "自动探测")
+        self.assertIsNone(args[1])
+
+    def test_detection_scan_emits_log_records(self):
+        with self.assertLogs("processing.word_support.paths", level="INFO") as logs:
+            lo_paths.log_detection_scan([Path("/nope/soffice")], None,
+                                        "unit")
         joined = "\n".join(logs.output)
         self.assertIn("/nope/soffice", joined, "扫描路径必须落日志")
         self.assertIn("未命中", joined)
