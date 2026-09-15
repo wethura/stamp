@@ -292,36 +292,46 @@ def _install_tk_callback_logging(root):
         pass
 
 
-def _guard_window_visibility(root, attempts: int = 3):
-    """主窗口可见性看门狗：若 deiconify 后窗口仍不可见，强制拉起并记日志。
+def _guard_window_visibility(root, attempts: int = 4):
+    """主窗口可见性看门狗：若窗口不可见，多机制强制拉起并记日志。
 
-    Windows 上曾出现主循环在跑、进程活着、窗口却不可见的情况
-    （用户报告「加载完成后消失」）。看门狗会重试 deiconify/lift/
-    topmost 抖动——多数隐形场景可被直接救回；救不回也有日志证据。
+    Windows 打包版曾出现主循环在跑、进程活着、窗口不可见。deiconify
+    单独无效时，依次叠加 wm_state(normal)/lift/focus_force。多数隐形
+    场景可被直接救回；救不回也有日志证据。
     """
     import time
 
     def check(attempt):
         try:
             viewable = bool(root.winfo_viewable())
-            logging.info("窗口可见性检查 %d/%d: viewable=%s geometry=%s",
-                         attempt, attempts, viewable, root.geometry())
+            logging.info("窗口可见性检查 %d/%d: viewable=%s geometry=%s state=%s",
+                         attempt, attempts, viewable, root.geometry(),
+                         root.state())
             if viewable:
                 return
-            if attempt >= attempts:
+            if attempt > attempts:
                 logging.error("主窗口在 %d 次强制拉起后仍不可见", attempts)
                 return
             logging.warning("主窗口不可见，尝试强制拉起（第 %d 次）", attempt)
+            # 多机制：不同 Tk/WM 组合下生效的接口不同
+            try:
+                root.wm_state("normal")
+            except Exception:  # noqa: BLE001
+                pass
             root.deiconify()
             root.lift()
+            try:
+                root.focus_force()
+            except Exception:  # noqa: BLE001
+                pass
             root.attributes("-topmost", True)
-            root.after(200, lambda: root.attributes("-topmost", False))
+            root.after(250, lambda: root.attributes("-topmost", False))
         except Exception:  # noqa: BLE001
             logging.exception("可见性检查失败")
             return
-        root.after(900, lambda: check(attempt + 1))
+        root.after(600, lambda: check(attempt + 1))
 
-    root.after(700, lambda: check(1))
+    root.after(500, lambda: check(1))
 
 
 def _show_main_window(root, window, app_controller):
@@ -354,8 +364,10 @@ def main():
     from ui.theme import init_theme
     init_theme()
 
+    # 不 withdraw 根窗口：Windows 打包版上「withdraw 后 deiconify」不可靠
+    # （实测 viewable 始终 False、系统窗口句柄为 0，进程活着但无界面）。
+    # 主窗直接显示，splash 作为置顶浮层盖在其上；init 完成后销毁浮层。
     root = ctk.CTk()
-    root.withdraw()
     _install_tk_callback_logging(root)
 
     # ── Splash screen ─────────────────────────────────────────────
