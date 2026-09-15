@@ -4,6 +4,7 @@
 """
 import hashlib
 import json
+import logging
 import os
 import shutil
 import threading
@@ -27,6 +28,8 @@ from .errors import (
     ConversionError,
 )
 from .precheck import DocxPrecheckError, check_docx
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PREFERENCE_PATH = os.path.join(
     os.path.expanduser("~"), ".stamp_tool", "word_engine.json")
@@ -63,10 +66,23 @@ class ConversionService:
     # ── 探测 ─────────────────────────────────────────────────────────
 
     def probe_all(self, refresh: bool = False) -> Dict[str, EngineInfo]:
+        """探测全部引擎；单个引擎失败不影响其他引擎与调用方。
+
+        调用方在打开文档的 UI 路径上，任何外抛异常在打包版（无控制台）
+        都会表现为闪退，因此这里做最后一道兜底。
+        """
         if self._probe_cache is None or refresh:
-            self._probe_cache = {
-                engine.engine_id: engine.probe() for engine in self._engines
-            }
+            cache: Dict[str, EngineInfo] = {}
+            for engine in self._engines:
+                engine_id = getattr(engine, "engine_id", repr(engine))
+                name = getattr(engine, "NAME", engine_id)
+                try:
+                    cache[engine_id] = engine.probe()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("引擎 %s 探测异常: %s", engine_id, exc, exc_info=True)
+                    cache[engine_id] = EngineInfo(engine_id, name, False,
+                                                  detail=f"探测失败: {exc}")
+            self._probe_cache = cache
         return dict(self._probe_cache)
 
     def available_engines(self, refresh: bool = False) -> List[EngineInfo]:

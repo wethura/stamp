@@ -94,6 +94,7 @@ class ComEngineTestCase(unittest.TestCase):
         rec = []
 
         engine._is_windows = lambda: True
+        engine._registry_available = lambda: True  # mac 上没有 winreg
         engine._registry_has = lambda pid: pid in prog_ids_registered
         engine._load_com_modules = lambda: (FakePythoncom(rec), FakeClient(rec, **client_kw))
         engine._probe_version = lambda pid: "Word.Application.16"
@@ -170,6 +171,7 @@ class ComEngineTestCase(unittest.TestCase):
     def test_wps_prog_ids_covered(self):
         engine = WpsComEngine()
         engine._is_windows = lambda: True
+        engine._registry_available = lambda: True
         registered = {"kwps.application"}
         engine._registry_has = lambda pid: pid in registered
         engine._probe_version = lambda pid: ""

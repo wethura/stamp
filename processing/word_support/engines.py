@@ -63,6 +63,7 @@ class SofficeEngine:
 
     ENGINE_ID = "soffice"
     NAME = "LibreOffice (无界面)"
+    PROBE_TIMEOUT_S = 8.0  # 能力探测要快；转换阶段另用 120s
     _CANDIDATES = (
         "/Applications/LibreOffice.app/Contents/MacOS/soffice",
         "/usr/bin/soffice",
@@ -94,19 +95,28 @@ class SofficeEngine:
         return self.ENGINE_ID
 
     def probe(self) -> EngineInfo:
-        bin_path = self._find_bin()
-        if bin_path is None:
-            return EngineInfo(self.ENGINE_ID, self.NAME, False,
-                              detail="未找到 soffice")
-        version = ""
+        # 探测绝不抛异常，且单个候选超时必须短：LibreOffice 首次启动
+        # 可能弹窗/初始化，30 秒会让「检查转换引擎」卡死界面
         try:
-            out = subprocess.run([bin_path.as_posix(), "--version"],
-                                 capture_output=True, text=True, timeout=30)
-            version = (out.stdout or out.stderr).strip().splitlines()[0]
-        except Exception:  # noqa: BLE001
-            pass
-        return EngineInfo(self.ENGINE_ID, self.NAME, True,
-                          version=version, detail=bin_path.as_posix())
+            bin_path = self._find_bin()
+            if bin_path is None:
+                return EngineInfo(self.ENGINE_ID, self.NAME, False,
+                                  detail="未找到 soffice")
+            version = ""
+            try:
+                out = subprocess.run([bin_path.as_posix(), "--version"],
+                                     capture_output=True, text=True,
+                                     timeout=self.PROBE_TIMEOUT_S)
+                lines = (out.stdout or out.stderr).strip().splitlines()
+                version = lines[0] if lines else ""
+            except Exception:  # noqa: BLE001  超时/启动失败一律降级
+                pass
+            # 即使取不到版本，可执行文件存在即可用（转换阶段还有完整校验）
+            return EngineInfo(self.ENGINE_ID, self.NAME, True,
+                              version=version, detail=bin_path.as_posix())
+        except Exception as exc:  # noqa: BLE001
+            return EngineInfo(self.ENGINE_ID, self.NAME, False,
+                              detail=f"探测失败: {exc}")
 
     def convert(self, work_copy: Path, out_pdf: Path, timeout_s: float = DEFAULT_TIMEOUT_S,
                 cancel_event=None) -> dict:
@@ -213,12 +223,16 @@ function run(argv) {
         return self.ENGINE_ID
 
     def probe(self) -> EngineInfo:
-        if not self.WORD_APP.exists():
+        try:
+            if not self.WORD_APP.exists():
+                return EngineInfo(self.ENGINE_ID, self.NAME, False,
+                                  detail="未安装 /Applications/Microsoft Word.app")
+            version = _read_bundle_version(self.WORD_APP / "Contents/Info.plist")
+            return EngineInfo(self.ENGINE_ID, self.NAME, True,
+                              version=version, detail=str(self.WORD_APP))
+        except Exception as exc:  # noqa: BLE001
             return EngineInfo(self.ENGINE_ID, self.NAME, False,
-                              detail="未安装 /Applications/Microsoft Word.app")
-        version = _read_bundle_version(self.WORD_APP / "Contents/Info.plist")
-        return EngineInfo(self.ENGINE_ID, self.NAME, True,
-                          version=version, detail=str(self.WORD_APP))
+                              detail=f"探测失败: {exc}")
 
     # ── JXA 辅助 ────────────────────────────────────────────────────
     @staticmethod
@@ -362,15 +376,19 @@ class WpsManualEngine:
         return self.ENGINE_ID
 
     def probe(self) -> EngineInfo:
-        for app in self._APP_CANDIDATES:
-            if app.exists():
-                version = ""
-                if sys.platform == "darwin":
-                    version = _read_bundle_version(app / "Contents/Info.plist")
-                return EngineInfo(self.ENGINE_ID, self.NAME, True,
-                                  version=version, detail=str(app),
-                                  manual_path_only=True)
-        return EngineInfo(self.ENGINE_ID, self.NAME, False, detail="未检测到 WPS")
+        try:
+            for app in self._APP_CANDIDATES:
+                if app.exists():
+                    version = ""
+                    if sys.platform == "darwin":
+                        version = _read_bundle_version(app / "Contents/Info.plist")
+                    return EngineInfo(self.ENGINE_ID, self.NAME, True,
+                                      version=version, detail=str(app),
+                                      manual_path_only=True)
+            return EngineInfo(self.ENGINE_ID, self.NAME, False, detail="未检测到 WPS")
+        except Exception as exc:  # noqa: BLE001
+            return EngineInfo(self.ENGINE_ID, self.NAME, False,
+                              detail=f"探测失败: {exc}")
 
     def convert(self, work_copy, out_pdf, timeout_s=DEFAULT_TIMEOUT_S, cancel_event=None):
         return _result(False, KIND_CONVERT,
@@ -401,19 +419,21 @@ class ComEngineBase:
         return pythoncom, win32com.client
 
     def _registry_has(self, prog_id: str) -> bool:
-        import winreg
+        # import 放在 try 内：打包版可能缺失 winreg（延迟导入对静态分析
+        # 不友好），ImportError 若逃逸会直接崩掉整个应用
         try:
+            import winreg
             winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id)
             return True
-        except OSError:
+        except Exception:  # noqa: BLE001  ImportError / OSError / 其他
             return False
 
     def _probe_version(self, prog_id: str) -> str:
-        import winreg
         try:
+            import winreg
             with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id + r"\CurVer") as key:
                 return winreg.QueryValueEx(key, "")[0]
-        except OSError:
+        except Exception:  # noqa: BLE001
             return ""
 
     @property
@@ -423,15 +443,33 @@ class ComEngineBase:
     def _first_registered(self) -> Optional[str]:
         return next((pid for pid in self.PROG_IDS if self._registry_has(pid)), None)
 
+    def _registry_available(self) -> bool:
+        """winreg 是否可用——打包缺失时探测结果必须能自我说明，
+        否则会把「查不到注册表」误报成「未安装」，排障时误导。"""
+        try:
+            import winreg  # noqa: F401
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     def probe(self) -> EngineInfo:
-        if not self._is_windows():
-            return EngineInfo(self.ENGINE_ID, self.NAME, False, detail="仅 Windows 可用")
-        prog_id = self._first_registered()
-        if prog_id is None:
-            return EngineInfo(self.ENGINE_ID, self.NAME, False, detail="未检测到已安装")
-        return EngineInfo(self.ENGINE_ID, self.NAME, True,
-                          version=self._probe_version(prog_id),
-                          detail=f"COM {prog_id}")
+        # 探测绝不抛异常：任何失败都降级为「不可用」，否则会连带
+        # 拖垮 probe_all → 打开文档流程（打包版无控制台，表现为闪退）
+        try:
+            if not self._is_windows():
+                return EngineInfo(self.ENGINE_ID, self.NAME, False, detail="仅 Windows 可用")
+            if not self._registry_available():
+                return EngineInfo(self.ENGINE_ID, self.NAME, False,
+                                  detail="无法读取注册表（winreg 不可用），无法检测安装")
+            prog_id = self._first_registered()
+            if prog_id is None:
+                return EngineInfo(self.ENGINE_ID, self.NAME, False, detail="未检测到已安装")
+            return EngineInfo(self.ENGINE_ID, self.NAME, True,
+                              version=self._probe_version(prog_id),
+                              detail=f"COM {prog_id}")
+        except Exception as exc:  # noqa: BLE001
+            return EngineInfo(self.ENGINE_ID, self.NAME, False,
+                              detail=f"探测失败: {exc}")
 
     def convert(self, work_copy: Path, out_pdf: Path,
                 timeout_s: float = DEFAULT_TIMEOUT_S, cancel_event=None) -> dict:

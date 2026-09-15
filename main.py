@@ -1,9 +1,50 @@
 """Application entry point — CustomTkinter."""
 
+import logging
 import os
 import sys
+import threading
+from pathlib import Path
 
 import customtkinter as ctk
+
+LOG_FILE_NAME = "stamp_tool.log"
+
+
+def _setup_logging() -> Path:
+    """打包版没有控制台：所有日志与未捕获异常落盘，便于用户反馈问题。"""
+    log_dir = Path.home() / ".stamp_tool" / "logs"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        log_dir = Path(os.environ.get("TEMP", "/tmp"))
+    log_path = log_dir / LOG_FILE_NAME
+    try:
+        logging.basicConfig(
+            filename=str(log_path), filemode="a", level=logging.INFO,
+            format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        )
+    except OSError:
+        logging.basicConfig(level=logging.INFO)
+    return log_path
+
+
+def _install_excepthook(log_path: Path):
+    """未捕获异常落盘并在下一次启动可见——闪退不再「不知道为什么」。"""
+    def hook(exc_type, exc, tb):
+        logging.critical("未捕获异常", exc_info=(exc_type, exc, tb))
+        try:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "程序遇到问题",
+                f"{exc_type.__name__}: {exc}\n\n详细信息已记录到：\n{log_path}",
+            )
+        except Exception:  # noqa: BLE001  兜底展示失败也要留下日志
+            pass
+
+    sys.excepthook = hook
+    threading.excepthook = lambda args: hook(
+        args.exc_type, args.exc_value, args.exc_traceback)
 
 
 def _selftest_core_pipeline() -> None:
@@ -118,6 +159,11 @@ def create_app_controller():
 
 
 def main():
+    log_path = _setup_logging()
+    _install_excepthook(log_path)
+    logging.info("启动 StampTool（python=%s, frozen=%s, platform=%s）",
+                 sys.version.split()[0], getattr(sys, "frozen", False), sys.platform)
+
     from ui.theme import init_theme
     init_theme()
 

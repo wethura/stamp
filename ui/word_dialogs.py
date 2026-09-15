@@ -63,7 +63,7 @@ def choose_engine(parent, engines: List, preferred_id: Optional[str] = None) -> 
 class ConversionProgressDialog(ctk.CTkToplevel):
     """不定进度 + 取消按钮的转换对话框（模态）。"""
 
-    def __init__(self, parent, on_cancel):
+    def __init__(self, parent, on_cancel, message: str = "正在转换 Word 文档…"):
         super().__init__(parent)
         self.title("正在转换")
         self.geometry("380x150")
@@ -71,7 +71,7 @@ class ConversionProgressDialog(ctk.CTkToplevel):
         self.attributes("-topmost", True)
         self.protocol("WM_DELETE_WINDOW", lambda: None)  # 仅允许通过取消按钮关闭
 
-        ctk.CTkLabel(self, text="正在转换 Word 文档…",
+        ctk.CTkLabel(self, text=message,
                      font=(Fonts.FAMILY, Fonts.HEADING_SIZE, "bold"),
                      text_color=Colors.TEXT_PRIMARY).pack(pady=(20, 8))
         ctk.CTkLabel(self, text="转换期间不会改动原始 Word 文件",

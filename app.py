@@ -1,5 +1,6 @@
 """Application controller — bridges UI and processing layers."""
 
+import logging
 import threading
 from tkinter import filedialog, messagebox
 from PIL import Image
@@ -18,6 +19,8 @@ from processing.stamp import apply_opacity
 from processing.word_support.errors import ConversionError
 from processing.word_support.service import get_shared_service
 from ui.word_dialogs import ConversionProgressDialog, choose_engine
+
+logger = logging.getLogger(__name__)
 
 
 class App:
@@ -119,43 +122,84 @@ class App:
         self.window.set_status(f"已加载: {path}  ({len(pages)} 页)")
         self._refresh_preview()
 
-    # --- Word 转换（P2.3/P2.4：后台转换 + 取消 + 引擎选择 + 手动 PDF）---
+    # --- Word 转换（P2.3/P2.4：后台探测 + 后台转换 + 取消 + 手动 PDF）---
 
     def _load_word_document(self, path: str, handler: WordHandler):
-        service = handler.service
-        engines = service.available_engines(refresh=True)
+        """后台探测引擎 → （可选）选择 → 后台转换；全程不阻塞 UI。
 
-        if not engines:
-            handler.close()
-            has_manual = any(info.available and info.manual_path_only
-                             for info in service.probe_all().values())
-            if has_manual and messagebox.askyesno(
-                    "WPS 暂不能自动转换",
-                    "已检测到 WPS，当前版本暂不能自动转换。\n"
-                    "是否改为手动导入已导出的 PDF？"):
-                self._manual_pdf_import()
-            else:
-                messagebox.showwarning(
-                    "无法打开 Word 文档",
-                    "未找到可用的 Word 转换引擎。\n"
-                    "请安装 LibreOffice，或在 Word/WPS 中将文件导出为 PDF 后拖入本工具。")
-            return
-
-        preferred = service.current_preference()
-        valid_ids = [info.engine_id for info in engines]
-        if handler.engine_id is None and len(engines) > 1 and preferred not in valid_ids:
-            chosen = choose_engine(self.window, engines, preferred)
-            if chosen is None:
-                return  # 用户取消选择，不打开
-            handler.engine_id = chosen
-            service.save_preference(chosen)
-        elif handler.engine_id is None:
-            handler.engine_id = engines[0].engine_id
-
+        引擎探测曾同步跑在 UI 线程：soffice 首次启动可能耗数十秒，
+        表现为「检查转换能力很慢」；探测异常还会直接崩掉应用。
+        """
         cancel_event = threading.Event()
         handler.cancel_event = cancel_event
         dialog = ConversionProgressDialog(
-            self.window, lambda: cancel_event.set())
+            self.window, lambda: cancel_event.set(),
+            message="正在检查可用的转换引擎…")
+        self.window.update()
+
+        def probe_worker():
+            try:
+                engines = service.available_engines(refresh=True)
+                error = None
+            except Exception as exc:  # noqa: BLE001  兜底，绝不外抛
+                logger.exception("引擎探测失败")
+                engines, error = [], exc
+            root = self.window.winfo_toplevel()
+            root.after(0, self._word_probed,
+                       path, handler, engines, error, dialog, cancel_event)
+
+        service = handler.service
+        threading.Thread(target=probe_worker, daemon=True).start()
+
+    def _word_probed(self, path, handler, engines, error, dialog, cancel_event):
+        dialog.close()
+        if cancel_event.is_set():
+            handler.close()
+            self.window.set_status("已取消，原文档保持不变")
+            return
+        if error is not None:
+            handler.close()
+            self._report_word_open_failure("检查转换引擎时出错", str(error),
+                                           offer_manual=True)
+            return
+        if not engines:
+            handler.close()
+            self._report_no_engine(handler.service)
+            return
+
+        chosen = self._resolve_engine(handler, engines)
+        if chosen is None:
+            handler.close()
+            self.window.set_status("未选择转换引擎，已取消打开")
+            return
+
+        self._start_word_conversion(path, handler, cancel_event)
+
+    def _resolve_engine(self, handler: WordHandler, engines):
+        """确定使用的引擎：已有指定 → 偏好 → 单选直接定 → 多选询问。"""
+        if handler.engine_id:
+            return handler.engine_id
+        service = handler.service
+        preferred = service.current_preference()
+        valid_ids = [info.engine_id for info in engines]
+
+        if len(engines) > 1 and preferred not in valid_ids:
+            chosen = choose_engine(self.window, engines, preferred)
+            if chosen is None:
+                return None
+            service.save_preference(chosen)
+        elif preferred in valid_ids:
+            chosen = preferred
+        else:
+            chosen = engines[0].engine_id
+
+        handler.engine_id = chosen
+        return chosen
+
+    def _start_word_conversion(self, path, handler, cancel_event):
+        dialog = ConversionProgressDialog(
+            self.window, lambda: cancel_event.set(),
+            message="正在转换 Word 文档…")
         self.window.update()
 
         def worker():
@@ -166,12 +210,40 @@ class App:
             except ConversionError as exc:
                 pages, error = None, exc
             except Exception as exc:  # noqa: BLE001
+                logger.exception("Word 转换异常")
                 pages, error = None, ConversionError("convert", str(exc))
             root = self.window.winfo_toplevel()
             root.after(0, self._word_load_finished,
                        path, handler, pages, dialog, error)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _report_no_engine(self, service):
+        """没有可自动转换的引擎：给出可执行的手动路径，不弹错误堆栈。"""
+        probes = service.probe_all().values()
+        manual = [info for info in probes if info.available and info.manual_path_only]
+        if manual and messagebox.askyesno(
+                "暂无自动转换方式",
+                "已检测到 WPS，当前版本暂不能自动转换。\n"
+                "是否改为手动导入已导出的 PDF？"):
+            self._manual_pdf_import()
+            return
+        if messagebox.askyesno(
+                "暂无自动转换方式",
+                "本机没有可用于转换 Word 的办公软件。\n\n"
+                "你可以在 Word / WPS / LibreOffice 中打开该文档，\n"
+                "选择「导出为 PDF」，再把 PDF 拖进本工具盖章。\n\n"
+                "现在选择已导出的 PDF 吗？"):
+            self._manual_pdf_import()
+        else:
+            self.window.set_status("未转换：可在办公软件中导出 PDF 后拖入本工具")
+
+    def _report_word_open_failure(self, title: str, detail: str, offer_manual=False):
+        logger.error("%s: %s", title, detail)
+        self.window.set_status(f"{title}（详情见日志）")
+        if offer_manual and messagebox.askyesno(
+                title, f"{detail}\n\n是否改为手动导入已导出的 PDF？"):
+            self._manual_pdf_import()
 
     def _word_load_finished(self, path, handler, pages, dialog, error):
         dialog.close()
@@ -189,9 +261,7 @@ class App:
             self.window.set_status("已取消转换，原文档保持不变")
             return
 
-        self.window.set_status("Word 转换失败")
-        if messagebox.askyesno("转换失败", f"{error}\n\n是否手动导入已导出的 PDF？"):
-            self._manual_pdf_import()
+        self._report_word_open_failure("Word 转换失败", str(error), offer_manual=True)
 
     def _manual_pdf_import(self):
         path = filedialog.askopenfilename(

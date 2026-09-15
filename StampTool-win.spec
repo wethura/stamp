@@ -11,6 +11,8 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('win32com')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 hiddenimports += ['pythoncom', 'win32com.client', 'pywintypes', 'win32timezone']
+# 引擎探测用 winreg 读注册表检测 Office/WPS 安装（函数内延迟导入）
+hiddenimports += ['winreg']
 
 
 a = Analysis(
