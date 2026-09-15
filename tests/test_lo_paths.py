@@ -200,7 +200,7 @@ class TestEnginePriority(TempStoreCase):
         with self.assertLogs("processing.word_support.paths", level="INFO") as logs:
             lo_paths.log_detection_scan([Path("/nope/soffice")], None,
                                         "unit")
-        joined = "\n".join(logs.output)
+        joined = "\n".join(logs.output).replace("\\", "/")
         self.assertIn("/nope/soffice", joined, "扫描路径必须落日志")
         self.assertIn("未命中", joined)
 
