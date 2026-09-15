@@ -67,7 +67,11 @@ def _read_bundle_version(plist_path: Path) -> str:
 
 
 class SofficeEngine:
-    """LibreOffice 无界面转换；独立 UserInstallation → 进程归属本任务，可终止。"""
+    """LibreOffice 无界面转换；独立 UserInstallation → 进程归属本任务，可终止。
+
+    查找优先级：STAMPTOOL_SOFFICE 环境覆盖 > 应用自管理驱动
+    （见 driver_manager，用户可选下载）> 系统安装路径。
+    """
 
     ENGINE_ID = "soffice"
     NAME = "LibreOffice (无界面)"
@@ -80,22 +84,54 @@ class SofficeEngine:
         "soffice",
     )
 
-    def __init__(self):
+    def __init__(self, driver_manager=None):
         self._bin = None
+        self._source = ""
+        if driver_manager is None:
+            from .driver_manager import DriverManager
+            driver_manager = DriverManager()
+        self._drivers = driver_manager
 
     def _find_bin(self) -> Optional[Path]:
         if self._bin is not None:
             return self._bin
-        for cand in self._CANDIDATES:
-            if "/" in cand:
-                if Path(cand).exists():
-                    self._bin = Path(cand)
-                    return self._bin
-            else:
-                found = shutil.which(cand)
-                if found:
-                    self._bin = Path(found)
-                    return self._bin
+        from . import paths as lo_paths
+        # 1) 测试/高级用户覆盖
+        override = os.environ.get("STAMPTOOL_SOFFICE")
+        if override:
+            candidate = Path(override)
+            if candidate.exists():
+                self._bin, self._source = candidate, "环境覆盖"
+                return self._bin
+        # 2) 用户手动指定的安装位置（探测不到时的第二层）
+        try:
+            manual = lo_paths.get_manual_soffice()
+        except Exception:  # noqa: BLE001
+            manual = None
+        if manual is not None:
+            self._bin, self._source = manual, "手动指定"
+            return self._bin
+        # 3) 应用自管理的下载驱动
+        try:
+            managed = self._drivers.managed_soffice_path()
+        except Exception:  # noqa: BLE001
+            managed = None
+        if managed is not None:
+            self._bin, self._source = managed, "内置下载"
+            return self._bin
+        # 4) 系统安装（含注册表/每用户目录等全量候选，扫描过程落日志）
+        candidates = lo_paths.candidate_paths()
+        for cand in candidates:
+            if cand.exists():
+                self._bin, self._source = cand, "系统安装"
+                lo_paths.log_detection_scan(candidates, cand, self._source)
+                return self._bin
+        found_in_path = shutil.which("soffice")
+        if found_in_path:
+            self._bin, self._source = Path(found_in_path), "系统 PATH"
+            lo_paths.log_detection_scan(candidates, self._bin, self._source)
+            return self._bin
+        lo_paths.log_detection_scan(candidates, None, "自动探测")
         return None
 
     @property
@@ -121,8 +157,11 @@ class SofficeEngine:
             except Exception:  # noqa: BLE001  超时/启动失败一律降级
                 pass
             # 即使取不到版本，可执行文件存在即可用（转换阶段还有完整校验）
+            detail = bin_path.as_posix()
+            if self._source in ("内置下载", "手动指定"):
+                detail += f" · {self._source}"
             return EngineInfo(self.ENGINE_ID, self.NAME, True,
-                              version=version, detail=bin_path.as_posix())
+                              version=version, detail=detail)
         except Exception as exc:  # noqa: BLE001
             return EngineInfo(self.ENGINE_ID, self.NAME, False,
                               detail=f"探测失败: {exc}")

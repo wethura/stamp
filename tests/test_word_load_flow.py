@@ -18,12 +18,16 @@ from app import App
 from processing.word_support.engines import EngineInfo
 from processing.word_support.service import ConversionService
 
-# 这些用例故意制造探测异常（并期望被记录），静默日志保持输出可读
-logging.disable(logging.CRITICAL)
+def setUpModule():
+    """这些用例故意制造探测异常（并期望被记录），静默日志保持输出可读。
+
+    注意必须在 setUpModule 而非导入期做：discovery 先导入全部模块，
+    导入期的全局 disable 会波及先执行的其他测试模块。
+    """
+    logging.disable(logging.CRITICAL)
 
 
 def tearDownModule():
-    """恢复日志级别，避免影响同进程的其他测试模块。"""
     logging.disable(logging.NOTSET)
 
 
@@ -61,17 +65,30 @@ class TestWordLoadDegradation(unittest.TestCase):
                               engines, error, self.dialog, self.cancel)
 
     def test_no_engine_does_not_crash_and_explains(self):
-        with mock.patch("app.messagebox.askyesno", return_value=False) as ask:
+        with mock.patch("ui.word_dialogs.choose_no_engine_action",
+                        return_value="cancel") as chooser:
             self._probed(engines=[])
-        self.assertTrue(ask.called, "必须告知用户为何打不开，并给出可选出口")
+        self.assertTrue(chooser.called, "必须给出出口（手动 PDF + 指引设置页）")
         self.handler.close.assert_called_once()
-        self.app.window.set_status.assert_called()
+        status = self.app.window.set_status.call_args[0][0]
+        self.assertIn("设置", status, "取消时应指引去设置页补引擎")
 
     def test_no_engine_offers_manual_pdf_import(self):
-        with mock.patch("app.messagebox.askyesno", return_value=True), \
+        with mock.patch("ui.word_dialogs.choose_no_engine_action",
+                        return_value="manual_pdf"), \
                 mock.patch.object(self.app, "_manual_pdf_import") as manual:
             self._probed(engines=[])
         manual.assert_called_once()
+
+    def test_no_engine_dialog_has_no_locate_or_download(self):
+        """「指定目录/下载引擎」属于设置页职责，无引擎弹窗不得内嵌。"""
+        import inspect
+
+        from ui import word_dialogs
+        source = inspect.getsource(word_dialogs.choose_no_engine_action)
+        # 文案可以指引去设置页，但不得提供对应按钮/分支
+        self.assertNotIn('make_choice("locate")', source)
+        self.assertNotIn('make_choice("download")', source)
 
     def test_probe_exception_degrades_instead_of_crashing(self):
         with mock.patch("app.messagebox.askyesno", return_value=False):

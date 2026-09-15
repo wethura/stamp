@@ -101,3 +101,18 @@ Converting(后台线程,不定进度条+取消,120s超时)
 - [ ] docx2pdf 的 macOS JXA 细节比对（其生产级脚本处理了弹窗/权限的边角）。
 - [ ] Windows COM 探测脚本移植（P0.2），Linux soffice 验证（P0.4）。
 - [ ] 加密 docx 样本构造与 precheck 分类（当前未验证）。
+
+## 8. LibreOffice 引擎的三层位置策略（2026-09-16，用户实测反馈驱动）
+
+自动探测遗漏是常态（每用户安装 %LOCALAPPDATA%\\Programs\\LibreOffice、
+自定义盘符、绿色版都曾漏报）。策略分层：
+
+| 层 | 优先级 | 说明 |
+|---|---|---|
+| STAMPTOOL_SOFFICE 环境覆盖 | 1 | 测试/高级用户 |
+| 用户手动指定目录（~/.stamp_tool/soffice_path.json） | 2 | 探测不是真理；宽容解析安装根/program/.app/父目录/可执行文件 |
+| 内置下载组件（DriverManager，~/.stamp_tool/drivers） | 3 | 官方源+字节数+SHA-256；Windows msiexec /a 解包（无 UAC/不写注册表）、macOS DMG 复制去隔离 |
+| 自动探测 | 4 | Program Files(x86/x64)、LOCALAPPDATA 每用户、注册表 InstallLocation(HKLM+HKCU×64/32 视图)、PATH；扫描路径全量落日志 |
+
+职责边界（用户明确）：「指定目录/下载引擎」只在 ⚙ 设置 的引擎页；
+无引擎弹窗只给「手动导入 PDF」+指引设置页。

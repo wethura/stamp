@@ -307,24 +307,45 @@ class App:
         threading.Thread(target=worker, daemon=True, name="word-convert").start()
 
     def _report_no_engine(self, service):
-        """没有可自动转换的引擎：给出可执行的手动路径，不弹错误堆栈。"""
+        """没有可自动转换的引擎：给出可执行的出口，不弹错误堆栈。
+
+        探测只是一层便利、可能遗漏（自定义目录、非标准安装），
+        因此首选出口是「用户指定安装目录」，下载组件是最后手段。
+        """
+        from ui.word_dialogs import choose_no_engine_action
+
         probes = service.probe_all().values()
-        manual = [info for info in probes if info.available and info.manual_path_only]
-        if manual and messagebox.askyesno(
-                "暂无自动转换方式",
-                "已检测到 WPS，当前版本暂不能自动转换。\n"
-                "是否改为手动导入已导出的 PDF？"):
-            self._manual_pdf_import()
+        manual_only = [info for info in probes
+                       if info.available and info.manual_path_only]
+        if manual_only:
+            # 检测到了 WPS 但接口不可用：没有可指定的本地程序，走手动 PDF
+            if messagebox.askyesno(
+                    "暂无自动转换方式",
+                    "已检测到 WPS，当前版本暂不能自动转换。\n"
+                    "是否改为手动导入已导出的 PDF？"):
+                self._manual_pdf_import()
+            else:
+                self.window.set_status("未转换：可在办公软件中导出 PDF 后拖入本工具")
             return
-        if messagebox.askyesno(
-                "暂无自动转换方式",
-                "本机没有可用于转换 Word 的办公软件。\n\n"
-                "你可以在 Word / WPS / LibreOffice 中打开该文档，\n"
-                "选择「导出为 PDF」，再把 PDF 拖进本工具盖章。\n\n"
-                "现在选择已导出的 PDF 吗？"):
+
+        choice = choose_no_engine_action(self.window)
+        if choice == "manual_pdf":
             self._manual_pdf_import()
         else:
-            self.window.set_status("未转换：可在办公软件中导出 PDF 后拖入本工具")
+            self.window.set_status("未转换：可在 ⚙ 设置 中指定安装目录或下载组件")
+
+    def _install_converter_driver(self):
+        """下载内置 LibreOffice 转换组件（设置页/无引擎弹窗共用入口）。"""
+        from ui.driver_dialogs import run_driver_install
+
+        def on_done(installed):
+            if not installed:
+                return
+            # 组件就绪后立即生效：刷新探测缓存并提示重新打开文档
+            get_shared_service().probe_all(refresh=True)
+            self.window.set_status("转换组件已就绪，可重新打开 Word 文档")
+
+        run_driver_install(self.window, on_done=on_done)
 
     def _report_word_open_failure(self, title: str, detail: str, offer_manual=False):
         logger.error("%s: %s", title, detail)

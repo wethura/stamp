@@ -99,3 +99,51 @@ class ConversionProgressDialog(ctk.CTkToplevel):
             self.destroy()
         except Exception:  # noqa: BLE001
             pass
+
+
+def choose_no_engine_action(parent, download_info: dict = None) -> str:
+    """没有可用引擎时的出口选择。返回 'manual_pdf' | 'cancel'。
+
+    「指定安装目录 / 下载转换组件」属于 ⚙ 设置 的引擎页职责，
+    此处只给立即可用的出口（手动 PDF），并提示去设置页补引擎。
+    """
+    result = {"choice": "cancel"}
+    dialog = ctk.CTkToplevel(parent)
+    dialog.title("暂无自动转换方式")
+    dialog.geometry("440x250")
+    dialog.resizable(False, False)
+    dialog.attributes("-topmost", True)
+
+    ctk.CTkLabel(dialog, text="本机没有检测到可用的 Word 转换引擎",
+                 font=(Fonts.FAMILY, Fonts.HEADING_SIZE, "bold"),
+                 text_color=Colors.TEXT_PRIMARY).pack(pady=(20, 4))
+    ctk.CTkLabel(dialog,
+                 text="自动检测可能遗漏，或本机尚未安装。\n"
+                      "可稍后在 ⚙ 设置 → Word 转换引擎 中：\n"
+                      "指定已安装的 LibreOffice 目录，或下载内置转换组件。",
+                 font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
+                 text_color=Colors.TEXT_SECONDARY,
+                 justify="left").pack(pady=(0, 12))
+
+    def make_choice(value):
+        def _choose():
+            result["choice"] = value
+            dialog.destroy()
+        return _choose
+
+    ctk.CTkButton(dialog, text="手动导入已导出的 PDF", height=38, corner_radius=8,
+                  fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
+                  text_color="white",
+                  font=(Fonts.FAMILY, Fonts.BODY_SIZE),
+                  command=make_choice("manual_pdf")).pack(fill="x", padx=30, pady=4)
+    ctk.CTkButton(dialog, text="取消", width=100, height=28,
+                  fg_color="transparent", border_width=1,
+                  border_color=Colors.BORDER_SUBTLE,
+                  hover_color=Colors.SURFACE_OVERLAY,
+                  text_color=Colors.TEXT_SECONDARY,
+                  command=make_choice("cancel")).pack(pady=(6, 14))
+
+    dialog.transient(parent)
+    dialog.grab_set()
+    parent.wait_window(dialog)
+    return result["choice"]
