@@ -2,6 +2,7 @@
 
 import logging
 import threading
+from queue import Empty, Queue
 from tkinter import filedialog, messagebox
 from PIL import Image
 from typing import Optional, List, Dict
@@ -36,6 +37,81 @@ class App:
         self._selected_instance_id: Optional[str] = None
 
         self.window = None
+
+        # ── 跨线程调度与流程看门狗 ─────────────────────────────────
+        # tkinter 的 after/控件调用只在主线程安全；工作线程通过队列投递
+        # 结果，由主线程轮询器执行（Windows 上线程内 root.after 不可靠，
+        # 曾表现为进度框出现后流程无声中断）。
+        self._main_queue: "Queue" = Queue()
+        self._poller_active = False
+        self._flow_token = 0
+        self._flow_lock = threading.Lock()
+        self._flow_guards: Dict[int, object] = {}
+
+    # --- 跨线程调度（工作线程 → 主线程） ---
+
+    def _ensure_main_poller(self):
+        """在主线程启动队列轮询器（幂等；只允许主线程调用）。"""
+        if not self._poller_active:
+            self._poller_active = True
+            self.window.after(80, self._drain_main_queue)
+
+    def _drain_main_queue(self):
+        while True:
+            try:
+                fn, args = self._main_queue.get_nowait()
+            except Empty:
+                break
+            try:
+                fn(*args)
+            except Exception:  # noqa: BLE001  单个回调失败不拖垮轮询器
+                logger.exception("主线程回调执行失败: %r", fn)
+        self.window.after(80, self._drain_main_queue)
+
+    def _dispatch_to_main(self, fn, *args):
+        """线程安全：任何线程都可调用；结果由主线程轮询器执行。"""
+        self._main_queue.put((fn, args))
+
+    # --- Word 流程令牌与看门狗 ---
+
+    def _next_flow_token(self) -> int:
+        with self._flow_lock:
+            self._flow_token += 1
+            return self._flow_token
+
+    def _is_stale_token(self, token: int) -> bool:
+        with self._flow_lock:
+            return token != self._flow_token
+
+    def _arm_flow_guard(self, token: int, dialog, seconds: float, stage: str):
+        """超时未收到下一阶段回调时收起进度框并报告（防「无声挂起」）。"""
+        def guard():
+            if self._is_stale_token(token):
+                return  # 流程已前进/取消，对话框由对应路径处理
+            logger.error("%s 阶段 %ss 无响应，自动收起进度框", stage, seconds)
+            try:
+                dialog.close()
+            except Exception:  # noqa: BLE001
+                pass
+            with self._flow_lock:
+                self._flow_token += 1  # 使迟到的回调失效
+            self.window.set_status(f"{stage}无响应，已中止（详情见日志）")
+
+        try:
+            after_id = self.window.after(int(seconds * 1000), guard)
+            with self._flow_lock:
+                self._flow_guards[token] = after_id
+        except Exception:  # noqa: BLE001  看门狗自身失败不影响主流程
+            logger.warning("看门狗注册失败（%s）", stage, exc_info=True)
+
+    def _disarm_flow_guard(self, token: int):
+        with self._flow_lock:
+            after_id = self._flow_guards.pop(token, None)
+        if after_id is not None:
+            try:
+                self.window.after_cancel(after_id)
+            except Exception:  # noqa: BLE001
+                pass
 
     # --- Document ---
 
@@ -124,18 +200,26 @@ class App:
 
     # --- Word 转换（P2.3/P2.4：后台探测 + 后台转换 + 取消 + 手动 PDF）---
 
+    PROBE_GUARD_S = 30.0    # 探测看门狗：引擎检查超过此时长自动收框报告
+    CONVERT_GUARD_S = 180.0  # 转换看门狗：超过 120s 转换上限 + 余量
+
     def _load_word_document(self, path: str, handler: WordHandler):
         """后台探测引擎 → （可选）选择 → 后台转换；全程不阻塞 UI。
 
-        引擎探测曾同步跑在 UI 线程：soffice 首次启动可能耗数十秒，
-        表现为「检查转换能力很慢」；探测异常还会直接崩掉应用。
+        线程纪律：工作线程绝不触碰 tkinter（含 after——Windows 上线程内
+        after 不可靠，曾表现为进度框出现后流程无声中断）。结果一律经
+        `_dispatch_to_main` 队列回主线程，并由看门狗兜底超时。
         """
+        service = handler.service
         cancel_event = threading.Event()
         handler.cancel_event = cancel_event
         dialog = ConversionProgressDialog(
             self.window, lambda: cancel_event.set(),
             message="正在检查可用的转换引擎…")
         self.window.update()
+        self._ensure_main_poller()
+        token = self._next_flow_token()
+        self._arm_flow_guard(token, dialog, self.PROBE_GUARD_S, "检查转换引擎")
 
         def probe_worker():
             try:
@@ -144,14 +228,17 @@ class App:
             except Exception as exc:  # noqa: BLE001  兜底，绝不外抛
                 logger.exception("引擎探测失败")
                 engines, error = [], exc
-            root = self.window.winfo_toplevel()
-            root.after(0, self._word_probed,
-                       path, handler, engines, error, dialog, cancel_event)
+            self._dispatch_to_main(self._word_probed, token, path, handler,
+                                   engines, error, dialog, cancel_event)
 
-        service = handler.service
-        threading.Thread(target=probe_worker, daemon=True).start()
+        threading.Thread(target=probe_worker, daemon=True, name="word-probe").start()
 
-    def _word_probed(self, path, handler, engines, error, dialog, cancel_event):
+    def _word_probed(self, token, path, handler, engines, error,
+                     dialog, cancel_event):
+        if self._is_stale_token(token):
+            logger.info("忽略过期的探测结果（会话已前进/超时）")
+            return
+        self._disarm_flow_guard(token)
         dialog.close()
         if cancel_event.is_set():
             handler.close()
@@ -201,6 +288,8 @@ class App:
             self.window, lambda: cancel_event.set(),
             message="正在转换 Word 文档…")
         self.window.update()
+        token = self._next_flow_token()
+        self._arm_flow_guard(token, dialog, self.CONVERT_GUARD_S, "转换")
 
         def worker():
             try:
@@ -212,11 +301,10 @@ class App:
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Word 转换异常")
                 pages, error = None, ConversionError("convert", str(exc))
-            root = self.window.winfo_toplevel()
-            root.after(0, self._word_load_finished,
-                       path, handler, pages, dialog, error)
+            self._dispatch_to_main(self._word_load_finished, token, path,
+                                   handler, pages, dialog, error)
 
-        threading.Thread(target=worker, daemon=True).start()
+        threading.Thread(target=worker, daemon=True, name="word-convert").start()
 
     def _report_no_engine(self, service):
         """没有可自动转换的引擎：给出可执行的手动路径，不弹错误堆栈。"""
@@ -245,7 +333,11 @@ class App:
                 title, f"{detail}\n\n是否改为手动导入已导出的 PDF？"):
             self._manual_pdf_import()
 
-    def _word_load_finished(self, path, handler, pages, dialog, error):
+    def _word_load_finished(self, token, path, handler, pages, dialog, error):
+        if self._is_stale_token(token):
+            logger.info("忽略过期的转换结果（会话已前进/超时）")
+            return
+        self._disarm_flow_guard(token)
         dialog.close()
         if error is None:
             self._activate_document(path, handler, pages)
