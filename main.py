@@ -100,6 +100,64 @@ def _selftest_core_pipeline() -> None:
         raise RuntimeError("instance not bound to active page")
 
 
+def _selftest_docx_pipeline() -> None:
+    """打包环境下走一遍用户的真实路径：打开 docx → 转换 → 盖章 → 导出。
+
+    用桩引擎替代外部办公软件（CI 无 Office），覆盖的是应用自身链路：
+    DOCX 前置校验 → 引擎调度 → PDFHandler 渲染/盖章/导出。
+    用户报告的「打开 Word 文档闪退」正是这条路径。
+    """
+    import tempfile
+    import zipfile
+    from pathlib import Path
+
+    import fitz
+    from PIL import Image
+
+    from processing.handlers.word_handler import WordHandler
+    from processing.word_support.engines import EngineInfo
+    from processing.word_support.service import ConversionService
+
+    class _StubEngine:
+        engine_id = "selftest-stub"
+        NAME = "Selftest Stub"
+
+        def probe(self):
+            return EngineInfo(self.engine_id, self.NAME, True, version="stub")
+
+        def convert(self, work_copy, out_pdf, timeout_s=120.0, cancel_event=None):
+            with fitz.open() as doc:
+                for _ in range(2):
+                    page = doc.new_page(width=595, height=842)
+                    page.insert_text((50, 80), "docx pipeline selftest")
+                doc.save(str(out_pdf))
+            return {"ok": True, "pdf_path": str(out_pdf)}
+
+    tmp = Path(tempfile.mkdtemp(prefix="stamp-docx-selftest-"))
+    source = tmp / "sample.docx"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", "<document/>")
+
+    service = ConversionService(engines=[_StubEngine()],
+                                preference_path=str(tmp / "pref.json"))
+    handler = WordHandler(service=service)
+    try:
+        handler.load(str(source))
+        if handler.page_count() != 2:
+            raise RuntimeError(f"docx pipeline page_count={handler.page_count()}")
+        rendered = handler.render_page(0)
+        if rendered.size[0] <= 0:
+            raise RuntimeError("docx pipeline render failed")
+        stamp = Image.new("RGBA", (100, 100), (180, 0, 0, 200))
+        out = tmp / "out.pdf"
+        handler.export_with_stamp(str(out), stamp, (0.3, 0.3), 0.2, {0})
+        if not out.exists():
+            raise RuntimeError("docx pipeline export produced no file")
+    finally:
+        handler.close()
+
+
 def _selftest_engine_probe() -> None:
     """打包环境下引擎探测必须可用。
 
@@ -153,6 +211,9 @@ def _run_selftest(root, timeout_s: float = 25.0):
                     _selftest_core_pipeline()
                     print("SELFTEST OK: core pipeline "
                           "(render + stamp + export)", flush=True)
+                    _selftest_docx_pipeline()
+                    print("SELFTEST OK: docx pipeline "
+                          "(precheck + convert + stamp + export)", flush=True)
                     _selftest_engine_probe()
                 root.destroy()
                 sys.exit(0)

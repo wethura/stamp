@@ -31,10 +31,12 @@ from .errors import (
 DEFAULT_TIMEOUT_S = 120.0
 
 # Windows 注册表模块：函数内 import 对 PyInstaller 静态分析不可靠，
-# 实测 exe 中缺失 winreg（导致 Office/WPS 检测失效）。顶层条件导入让
-# 打包器必然收录；非 Windows 平台不触发。
+# 顶层条件导入让打包器必然收录；非 Windows 平台不触发。
 if sys.platform == "win32":  # pragma: no cover - 平台分支
     import winreg  # noqa: F401
+
+# GUI 程序调用外部进程时避免闪出控制台窗口（Windows 打包版的常见噪音）
+_NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
 
 
 @dataclass
@@ -112,7 +114,8 @@ class SofficeEngine:
             try:
                 out = subprocess.run([bin_path.as_posix(), "--version"],
                                      capture_output=True, text=True,
-                                     timeout=self.PROBE_TIMEOUT_S)
+                                     timeout=self.PROBE_TIMEOUT_S,
+                                     creationflags=_NO_WINDOW_FLAGS)
                 lines = (out.stdout or out.stderr).strip().splitlines()
                 version = lines[0] if lines else ""
             except Exception:  # noqa: BLE001  超时/启动失败一律降级
@@ -141,7 +144,8 @@ class SofficeEngine:
             work_copy.as_posix(),
         ]
         deadline = time.monotonic() + timeout_s
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                creationflags=_NO_WINDOW_FLAGS)
         try:
             while proc.poll() is None:
                 if cancel_event is not None and cancel_event.is_set():
