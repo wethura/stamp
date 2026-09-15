@@ -100,6 +100,27 @@ def _selftest_core_pipeline() -> None:
         raise RuntimeError("instance not bound to active page")
 
 
+def _selftest_engine_probe() -> None:
+    """打包环境下引擎探测必须可用。
+
+    Windows 上 COM 检测依赖 winreg；实测它可能未被 PyInstaller 收录，
+    届时探测会降级成「无法读取注册表」——不再闪退（已防御），但功能受损。
+    这里在打包产物上直接断言，让这类打包缺失在 CI 就被抓出来。
+    """
+    from processing.word_support.service import get_shared_service
+
+    infos = get_shared_service().probe_all(refresh=True)
+    if not infos:
+        raise RuntimeError("engine probe returned no results")
+    if sys.platform == "win32":
+        broken = [i for i in infos.values()
+                  if "注册表" in i.detail or "winreg" in i.detail.lower()]
+        if broken:
+            detail = "; ".join(f"{i.engine_id}: {i.detail}" for i in broken)
+            raise RuntimeError(f"winreg 未被打包，Office/WPS 检测失效 → {detail}")
+    print(f"SELFTEST OK: engine probe ({len(infos)} engines)", flush=True)
+
+
 def _run_selftest(root, timeout_s: float = 25.0):
     """打包自检：窗口可用 + （full 模式）核心链路可跑。
 
@@ -132,6 +153,7 @@ def _run_selftest(root, timeout_s: float = 25.0):
                     _selftest_core_pipeline()
                     print("SELFTEST OK: core pipeline "
                           "(render + stamp + export)", flush=True)
+                    _selftest_engine_probe()
                 root.destroy()
                 sys.exit(0)
             if time.monotonic() > deadline:

@@ -30,6 +30,12 @@ from .errors import (
 
 DEFAULT_TIMEOUT_S = 120.0
 
+# Windows 注册表模块：函数内 import 对 PyInstaller 静态分析不可靠，
+# 实测 exe 中缺失 winreg（导致 Office/WPS 检测失效）。顶层条件导入让
+# 打包器必然收录；非 Windows 平台不触发。
+if sys.platform == "win32":  # pragma: no cover - 平台分支
+    import winreg  # noqa: F401
+
 
 @dataclass
 class EngineInfo:
