@@ -39,10 +39,25 @@ jobs:
         timeout-minutes: 10
         shell: bash
         run: |
-          STAMPTOOL_SELFTEST=headless python main.py 2>&1 | tee selftest.log
-          code=${PIPESTATUS[0]}
-          if [ "$code" -ne 0 ]; then
-            tail -25 selftest.log | while IFS= read -r line; do
+          status=0
+          STAMPTOOL_SELFTEST=headless python main.py > selftest.log 2>&1 || status=$?
+          {
+            echo "## Source selftest diagnostics (${{ runner.os }})"
+            echo
+            echo "- exit code: \`$status\`"
+            echo "- python: \`(which python || echo '?')\` · \`(python --version 2>&1 || echo '?')\`"
+            echo
+            echo "### selftest.log (full)"
+            echo '```text'
+            cat selftest.log || true
+            echo '```'
+            echo "### app log tail (~/.stamp_tool/logs/stamp_tool.log)"
+            echo '```text'
+            tail -80 "$HOME/.stamp_tool/logs/stamp_tool.log" 2>/dev/null || echo "(no app log)"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [ "$status" -ne 0 ]; then
+            tail -15 selftest.log | while IFS= read -r line; do
               echo "::error::src-selftest: $line"
             done
             exit 1
