@@ -30,6 +30,16 @@ from .errors import (
 
 DEFAULT_TIMEOUT_S = 120.0
 
+# Word 脚本自动化路径的「防呆开关」（2026-09-17 真机诊断后默认关闭=启用引擎）：
+# Word 16.112.4 / macOS 26 空启动会停在模态的开始画面（图库），阻塞后续全部
+# AppleEvent——save as -1708「信息无法识别」、quit -128、文档属性全 null；
+# JXA 用 POSIX 字符串路径 open 还会弹「找不到文件」。可靠配方（已真机验证）：
+# LaunchServices 带文档启动 + AppleScript save as。若未来 Word 版本再现
+# save as 被拒收，置 True 即可整体停用该后端；STAMPTOOL_ENABLE_WORD_JXA=1
+# 为人工复核保留的强制启用口。
+WORD_JXA_SAVEAS_BROKEN = False
+_WORD_JXA_OVERRIDE_ENV = "STAMPTOOL_ENABLE_WORD_JXA"
+
 # Windows 注册表模块：函数内 import 对 PyInstaller 静态分析不可靠，
 # 顶层条件导入让打包器必然收录；非 Windows 平台不触发。
 if sys.platform == "win32":  # pragma: no cover - 平台分支
@@ -223,44 +233,50 @@ class SofficeEngine:
 
 
 class WordJxaEngine:
-    """macOS Microsoft Word：JXA 分阶段自动化（详见 design.md 决策 2/6/7）。"""
+    """macOS Microsoft Word 自动化（engine_id 沿用 word-jxa）。
+
+    2026-09-17 重写自动化路径（真机诊断，见 design.md 决策 7）：
+    - 绝不空启动 Word（会停在模态开始画面，阻塞全部 AppleEvent）；
+      用 LaunchServices 带文档启动（open -a Word <file>）。
+    - 另存用 AppleScript `save as active document file format format PDF`
+      （真机验证通过）；JXA 字符串路径 open 会触发「找不到文件」弹窗，弃用。
+    - 输出落在 Word 沙盒容器内的暂存目录，避免「授权访问」弹窗。
+    """
 
     ENGINE_ID = "word-jxa"
-    NAME = "Microsoft Word (JXA)"
+    NAME = "Microsoft Word"
     WORD_APP = Path("/Applications/Microsoft Word.app")
     MER_PATTERN = "SharedSupport/Microsoft Error Reporting.app/Contents/MacOS"
 
-    JXA_ENSURE_READY = r"""
-function run() {
-    var app = Application('com.microsoft.Word');
-    var wasRunning = app.running();
-    app.includeStandardAdditions = true;
-    try {
-        if (!wasRunning) { app.launch(); }
-        app.activate();
-    } catch (e) {
-        return JSON.stringify({ok: false, error: String(e), wasRunning: wasRunning});
-    }
-    return JSON.stringify({ok: true, wasRunning: wasRunning});
-}
+    AS_ACTIVE_DOC_NAME = r"""
+on run
+	tell application "Microsoft Word"
+		if (count of documents) = 0 then return ""
+		try
+			return name of active document
+		on error
+			return ""
+		end try
+	end tell
+end run
 """
 
-    JXA_OPEN_SAVE = r"""
-function run(argv) {
-    var inPath = argv[0];
-    var outPath = argv[1];
-    var app = Application('com.microsoft.Word');
-    try {
-        app.activate();
-        app.open(inPath);
-        app.activeDocument.saveAs({ fileName: outPath, fileFormat: 'format PDF' });
-    } catch (e) {
-        try { app.activeDocument.close({ saving: 'no' }); } catch (e2) {}
-        return JSON.stringify({ok: false, error: String(e)});
-    }
-    try { app.activeDocument.close({ saving: 'no' }); } catch (e3) {}
-    return JSON.stringify({ok: true});
-}
+    AS_SAVE_AS_PDF = r"""
+on run argv
+	tell application "Microsoft Word"
+		save as active document file format format PDF file name (item 1 of argv)
+	end tell
+end run
+"""
+
+    AS_CLOSE_ACTIVE = r"""
+on run
+	tell application "Microsoft Word"
+		try
+			close active document saving no
+		end try
+	end tell
+end run
 """
 
     def __init__(self):
@@ -277,30 +293,32 @@ function run(argv) {
                 return EngineInfo(self.ENGINE_ID, self.NAME, False,
                                   detail="未安装 /Applications/Microsoft Word.app")
             version = _read_bundle_version(self.WORD_APP / "Contents/Info.plist")
+            if WORD_JXA_SAVEAS_BROKEN and not os.environ.get(_WORD_JXA_OVERRIDE_ENV):
+                return EngineInfo(self.ENGINE_ID, self.NAME, False, version=version,
+                                  detail="此 Word 版本的脚本导出 PDF 接口失效（-1708），"
+                                         "引擎已停用；可在 Word 中导出 PDF 后拖入，"
+                                         "或使用 LibreOffice")
             return EngineInfo(self.ENGINE_ID, self.NAME, True,
                               version=version, detail=str(self.WORD_APP))
         except Exception as exc:  # noqa: BLE001
             return EngineInfo(self.ENGINE_ID, self.NAME, False,
                               detail=f"探测失败: {exc}")
 
-    # ── JXA 辅助 ────────────────────────────────────────────────────
+    # ── AppleScript 辅助 ────────────────────────────────────────────
     @staticmethod
-    def _jxa(script: str, args: list, timeout_s: float):
-        cmd = ["osascript", "-l", "JavaScript", "-"] + args
+    def _osa(script: str, args: list, timeout_s: float):
+        """执行 AppleScript（stdin 传入，argv 传参），返回 (stdout, 错误)。"""
+        cmd = ["osascript", "-"] + args
         try:
             proc = subprocess.run(cmd, input=script, capture_output=True,
                                   text=True, timeout=timeout_s)
         except subprocess.TimeoutExpired:
             return None, KIND_TIMEOUT
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "error": f"osascript 执行异常: {exc}"}, KIND_CONVERT
-        stdout = (proc.stdout or "").strip()
-        try:
-            payload = json.loads(stdout.splitlines()[-1]) if stdout else {}
-        except (ValueError, IndexError):
-            payload = {"ok": False,
-                       "error": f"无法解析 JXA 输出: {stdout[:120]}"}
-        return payload, None
+            return None, f"osascript 执行异常: {exc}"
+        if proc.returncode != 0:
+            return None, (proc.stderr or "osascript 失败").strip()
+        return (proc.stdout or "").strip(), None
 
     @staticmethod
     def _word_running() -> bool:
@@ -357,50 +375,68 @@ function run(argv) {
         mer_note = self._dismiss_error_reporter()
         self._stage_dir.mkdir(parents=True, exist_ok=True)
         staged_pdf = self._stage_dir / f"{out_pdf.stem}-{os.getpid()}.pdf"
+        we_launched = not self._word_running()
 
         try:
             return self._convert_staged(work_copy, out_pdf, staged_pdf,
-                                        timeout_s, cancel_event, mer_note)
+                                        timeout_s, cancel_event, mer_note,
+                                        we_launched)
         finally:
             shutil.rmtree(self._stage_dir, ignore_errors=True)
 
     def _convert_staged(self, work_copy, out_pdf, staged_pdf, timeout_s,
-                        cancel_event, mer_note) -> dict:
-        payload, err = self._jxa(self.JXA_ENSURE_READY, [], min(30, timeout_s))
-        if cancel_event is not None and cancel_event.is_set():
-            return _result(False, KIND_CANCELLED, "已取消")
-        if err is not None or not payload.get("ok"):
-            msg = str(payload.get("error", "")) if payload else f"启动阶段超时({err})"
-            if "-1743" in msg:
-                return _result(False, KIND_PERMISSION,
-                               "自动化权限被拒：需在系统设置中允许本应用控制 Microsoft Word")
-            return _result(False, err or KIND_CONVERT, f"启动 Word 失败: {msg}")
-        we_launched = not payload.get("wasRunning", True)
+                        cancel_event, mer_note, we_launched) -> dict:
+        # 1) LaunchServices 带文档启动/唤起——绝不让 Word 空启动到开始画面。
+        #    对未运行/已运行的实例都有效（odoc 事件走系统规范路径）。
+        try:
+            subprocess.run(["open", "-a", str(self.WORD_APP), str(work_copy)],
+                           capture_output=True, timeout=30, check=True)
+        except Exception as exc:  # noqa: BLE001
+            return _result(False, KIND_CONVERT,
+                           f"无法启动 Word 打开文档: {exc}",
+                           cleanup_note=self._best_effort_quit(we_launched))
 
-        deadline = time.monotonic() + 30
-        while not self._word_running() and time.monotonic() < deadline:
+        # 2) 轮询直到目标文档真正打开。开始画面/登录/激活/「找不到文件」
+        #    等弹窗会让文档一直打不开——超时给出可操作的指引。
+        expected = work_copy.name
+        deadline = time.monotonic() + min(60.0, max(timeout_s, 10.0))
+        doc_ready = False
+        while time.monotonic() < deadline:
             if cancel_event is not None and cancel_event.is_set():
                 return _result(False, KIND_CANCELLED, "已取消",
                                cleanup_note=self._best_effort_quit(we_launched))
-            time.sleep(0.5)
-        time.sleep(5)  # 首启/恢复弹窗静置窗口
-
-        payload, err = self._jxa(self.JXA_OPEN_SAVE,
-                                 [work_copy.as_posix(), staged_pdf.as_posix()],
-                                 timeout_s)
-        cleanup = self._best_effort_quit(we_launched)
-        if err == KIND_TIMEOUT or (payload and not payload.get("ok")
-                                   and "-1712" in str(payload.get("error"))):
+            name, err = self._osa(self.AS_ACTIVE_DOC_NAME, [], 10)
+            if err and "-1743" in err:
+                return _result(False, KIND_PERMISSION,
+                               "自动化权限被拒：需在系统设置中允许本应用控制 "
+                               "Microsoft Word",
+                               cleanup_note=self._best_effort_quit(we_launched))
+            if name == expected:
+                doc_ready = True
+                break
+            time.sleep(1)
+        if not doc_ready:
             return _result(False, KIND_TIMEOUT,
-                           "Word 保存超时：存在待处理的模态弹窗（登录/激活/文件访问确认），"
-                           "请处理后重试，或手动导出 PDF", cleanup_note=cleanup)
-        if err is not None:
-            return _result(False, err, str(payload) if payload else "转换失败",
+                           "Word 未能在时限内打开文档：可能停留在开始画面或有"
+                           "待处理弹窗（登录/激活/文件访问确认/恢复文档）。"
+                           "请切到 Word 处理后重试，或改用 LibreOffice 引擎",
+                           cleanup_note=self._best_effort_quit(we_launched))
+
+        # 3) 脚本另存为 PDF（AppleScript save as，2026-09-17 真机验证通过）
+        out, err = self._osa(self.AS_SAVE_AS_PDF, [staged_pdf.as_posix()],
+                             timeout_s)
+        cleanup = self._best_effort_quit(we_launched)
+        self._osa(self.AS_CLOSE_ACTIVE, [], 15)
+        if err == KIND_TIMEOUT or (err and "-1712" in err):
+            return _result(False, KIND_TIMEOUT,
+                           "Word 保存超时：存在待处理的模态弹窗（登录/激活/"
+                           "文件访问确认），请处理后重试，或手动导出 PDF",
                            cleanup_note=cleanup)
-        if not payload.get("ok"):
-            msg = str(payload.get("error", ""))
-            kind = KIND_PERMISSION if "-1743" in msg else KIND_CONVERT
-            return _result(False, kind, msg, cleanup_note=cleanup)
+        if err is not None:
+            if "-1708" in err or "信息无法识别" in err:
+                err = ("Word 拒绝了脚本导出命令（-1708）：请切到 Word 处理可能的"
+                       "弹窗/开始画面后重试，或改用 LibreOffice 引擎。")
+            return _result(False, KIND_CONVERT, err, cleanup_note=cleanup)
         if not staged_pdf.exists():
             return _result(False, KIND_CONVERT, "Word 报告成功但 PDF 未生成",
                            cleanup_note=cleanup)
