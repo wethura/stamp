@@ -210,43 +210,41 @@ def _selftest_engine_probe() -> None:
     print(f"SELFTEST OK: engine probe ({len(infos)} engines)", flush=True)
 
 
-def _run_selftest(root, timeout_s: float = 25.0):
-    """打包自检：窗口可用 + （full 模式）核心链路可跑。
+def _selftest_headless() -> None:
+    """无头自检：不创建任何 Tk 窗口，纯链路验证（CI 专用）。
 
-    - `STAMPTOOL_SELFTEST=1`：窗口布局就绪即通过
-    - `STAMPTOOL_SELFTEST=full`：额外跑一遍渲染 → 盖章 → 导出
-
-    窗口"已映射"依赖真实显示会话（CI runner 通常没有），因此硬标准是
-    布局就绪（宽高有效）——打包缺资源会在这里暴露；映射状态仅作标注。
+    Windows runner 上 GUI 窗口的创建/轮询行为不可控（曾让自检步骤
+    10 分钟无输出超时），而发布真正要守护的是「核心链路 + 引擎探测」
+    ——这些完全不依赖 GUI。窗口可见性由真实启动门禁单独验证。
     """
+    _selftest_core_pipeline()
+    print("SELFTEST OK: core pipeline (render + stamp + export)", flush=True)
+    _selftest_docx_pipeline()
+    print("SELFTEST OK: docx pipeline "
+          "(precheck + convert + stamp + export)", flush=True)
+    _selftest_engine_probe()
+
+
+def _finish(code: int):
+    """自检收尾：冲刷日志缓冲后直接终止进程（绕过 mainloop/钩子语义）。"""
+    try:
+        logging.shutdown()
+    except Exception:  # noqa: BLE001
+        pass
+    os._exit(code)
+
+
+def _selftest_windowed(root, timeout_s: float = 25.0):
+    """窗口自检（本机人工验证用）：等待主窗口完成布局后收尾退出。"""
     import time
 
-    mode = os.environ.get("STAMPTOOL_SELFTEST", "")
     deadline = time.monotonic() + timeout_s
-
-    def _selftest_exit(code: int):
-        """在 Tk 回调内可靠退出。
-
-        sys.exit 的 SystemExit 会穿过 mainloop 进入全局钩子——钩子弹的
-        messagebox 在无人值守环境（CI/打包自检）会永久阻塞。这里显式
-        收尾后直接终止进程。
-        """
-        try:
-            root.destroy()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            logging.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
-        os._exit(code)
 
     def poll():
         try:
             mapped = bool(root.winfo_ismapped())
             width, height = root.winfo_width(), root.winfo_height()
             req_w, req_h = root.winfo_reqwidth(), root.winfo_reqheight()
-            # 有效布局：已映射，或有实际/请求尺寸（无显示会话时靠后者）
             laid_out = (width > 1 and height > 1) or (req_w > 1 and req_h > 1)
             if mapped or laid_out:
                 if mapped:
@@ -255,25 +253,15 @@ def _run_selftest(root, timeout_s: float = 25.0):
                     print(f"SELFTEST OK: window laid out "
                           f"(actual {width}x{height}, requested {req_w}x{req_h}); "
                           f"not mapped (no display session)", flush=True)
-                if mode == "full":
-                    _selftest_core_pipeline()
-                    print("SELFTEST OK: core pipeline "
-                          "(render + stamp + export)", flush=True)
-                    _selftest_docx_pipeline()
-                    print("SELFTEST OK: docx pipeline "
-                          "(precheck + convert + stamp + export)", flush=True)
-                    _selftest_engine_probe()
-                _selftest_exit(0)
+                _finish(0)
             if time.monotonic() > deadline:
                 print(f"SELFTEST FAIL: window never laid out — "
                       f"actual {width}x{height}, requested {req_w}x{req_h}, "
                       f"mapped={mapped}; packaging may be incomplete", flush=True)
-                _selftest_exit(1)
-        except SystemExit:
-            raise
+                _finish(1)
         except Exception as exc:  # noqa: BLE001
             print(f"SELFTEST FAIL: {exc}", flush=True)
-            _selftest_exit(1)
+            _finish(1)
         root.after(400, poll)
 
     root.after(400, poll)
@@ -383,6 +371,13 @@ def main():
     logging.info("启动 StampTool（python=%s, frozen=%s, platform=%s）",
                  sys.version.split()[0], getattr(sys, "frozen", False), sys.platform)
 
+    selftest_mode = os.environ.get("STAMPTOOL_SELFTEST", "")
+
+    if selftest_mode == "headless":
+        # CI：完全不创建 Tk（Windows runner 上窗口行为不可控曾挂死自检）
+        _selftest_headless()
+        _finish(0)
+
     from ui.theme import init_theme
     init_theme()
 
@@ -420,8 +415,8 @@ def main():
     _show_main_window(root, window, app_controller)
     logging.info("主窗口已显示，进入主循环")
 
-    if os.environ.get("STAMPTOOL_SELFTEST"):
-        _run_selftest(root)
+    if selftest_mode:
+        _selftest_windowed(root)
 
     root.mainloop()
 
