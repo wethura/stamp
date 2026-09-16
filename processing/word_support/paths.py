@@ -148,8 +148,10 @@ def _windows_registry_roots() -> List[Path]:
     except ImportError:
         return roots
     views = [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
-    accesses = [winreg.KEY_READ | winreg.KEYWOW64_64VIEW,
-                winreg.KEY_READ | winreg.KEYWOW64_32VIEW]
+    # KEY_WOW64_64KEY/32KEY：32 位 Python 读 64/32 位注册表视图的正确常量名
+    # （曾误写成 KEYWOW64_64VIEW → AttributeError，Windows 上探测整体失效）
+    accesses = [winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+                winreg.KEY_READ | winreg.KEY_WOW64_32KEY]
     for hive in views:
         for access in accesses:
             try:

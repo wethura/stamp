@@ -205,5 +205,39 @@ class TestEnginePriority(TempStoreCase):
         self.assertIn("未命中", joined)
 
 
+class TestWindowsRegistryRoots(unittest.TestCase):
+    """真跑 _windows_registry_roots：winreg 常量名必须真实存在。
+
+    曾误写成 KEYWOW64_64VIEW（正确名 KEY_WOW64_64KEY）→ AttributeError
+    让 Windows 上整个探测失效；旧测试把该函数整体 mock 掉，没拦住。
+    """
+
+    def test_registry_scan_runs_with_real_constant_names(self):
+        import types
+        fake = types.ModuleType("winreg")
+        fake.HKEY_LOCAL_MACHINE = 0x80000002
+        fake.HKEY_CURRENT_USER = 0x80000001
+        fake.KEY_READ = 0x20019
+        fake.KEY_WOW64_64KEY = 0x0100
+        fake.KEY_WOW64_32KEY = 0x0200
+        opened = []
+
+        def fake_open_key(hive, path, reserved, access):
+            opened.append((hive, access))
+            raise OSError("not found")
+
+        fake.OpenKey = fake_open_key
+        fake.EnumKey = lambda key, index: None
+        with mock.patch.dict("sys.modules", {"winreg": fake}), \
+             mock.patch.object(lo_paths.sys, "platform", "win32"):
+            roots = lo_paths._windows_registry_roots()
+        self.assertEqual(roots, [])
+        # HKLM + HKCU 各查 64/32 位视图，共 4 次
+        self.assertEqual(len(opened), 4)
+        for _, access in opened:
+            self.assertIn(access, (fake.KEY_READ | fake.KEY_WOW64_64KEY,
+                                   fake.KEY_READ | fake.KEY_WOW64_32KEY))
+
+
 if __name__ == "__main__":
     unittest.main()
