@@ -93,20 +93,25 @@ jobs:
           # 自检：窗口布局 + 核心链路 + 引擎探测（导入/资源缺失都会失败）
           # 用 cmd 重定向兜底（onefile 引导进程 + 子进程结构）
           $env:STAMPTOOL_SELFTEST = "headless"
-          cmd /c "dist\StampTool.exe > %TEMP%\selftest.out 2> %TEMP%\selftest.err & echo EXIT:%ERRORLEVEL% > %TEMP%\selftest.code"
-          $code = (Get-Content "$env:TEMP\selftest.code" -ErrorAction SilentlyContinue) -replace "EXIT:",""
+          cmd /c "dist\StampTool.exe > %TEMP%\selftest.out 2> %TEMP%\selftest.err"
+          $code = $LASTEXITCODE
           $lines = @(Get-Content "$env:TEMP\selftest.out","$env:TEMP\selftest.err" -ErrorAction SilentlyContinue)
           $lines | ForEach-Object { Write-Host $_ }
           "exit code: $code (output lines: $($lines.Count))"
-          if ("$code" -ne "0") {
-            if ($lines.Count -eq 0) {
-              echo "::error::selftest produced NO output (exit $code) — crashed before printing"
-            } else {
-              $lines | Select-Object -Last 25 | ForEach-Object { echo "::error::selftest: $_" }
-            }
+          # 断言依据：三条 SELFTEST OK 标记齐全且无 Traceback。onefile
+          # 引导进程在 windowed 构建上的退出码传递不可靠（曾出现输出全 OK
+          # 但步骤按退出码判败），退出码仅作信息性记录。
+          $joined = $lines -join "`n"
+          $ok = ($joined -match "SELFTEST OK: core pipeline") -and
+                ($joined -match "SELFTEST OK: docx pipeline") -and
+                ($joined -match "SELFTEST OK: engine probe") -and
+                ($joined -notmatch "Traceback")
+          if (-not $ok) {
+            $lines | Select-Object -Last 25 | ForEach-Object { echo "::error::selftest: $_" }
+            echo "::error::selftest exit=$code"
             throw "selftest failed (exit $code)"
           }
-          "selftest passed: headless mode"
+          "selftest passed: headless mode (exit=$code, informational)"
       - name: Real-launch visibility gate (fresh + corrupted state)
         timeout-minutes: 10
         shell: pwsh
