@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import threading
+import traceback
 from pathlib import Path
 
 import customtkinter as ctk
@@ -375,7 +376,17 @@ def main():
 
     if selftest_mode == "headless":
         # CI：完全不创建 Tk（Windows runner 上窗口行为不可控曾挂死自检）
-        _selftest_headless()
+        try:
+            _selftest_headless()
+        except BaseException:  # noqa: BLE001
+            # 无人值守时 excepthook 只把异常落盘不打屏——曾在 Windows CI 上
+            # 表现为「退出码 1 且零输出」。自检必须把真实堆栈打到 stderr。
+            if sys.stderr is not None:
+                traceback.print_exc(file=sys.stderr)
+                sys.stderr.flush()
+            else:
+                logging.exception("自检失败")
+            _finish(1)
         _finish(0)
 
     from ui.theme import init_theme
