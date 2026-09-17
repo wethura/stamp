@@ -76,6 +76,27 @@ def _read_bundle_version(plist_path: Path) -> str:
         return ""
 
 
+def _soffice_convert_cmd(bin_path: Path, profile_dir: str,
+                         out_dir: Path, work_copy: Path) -> list:
+    """soffice 无界面转换命令行。
+
+    -env:UserInstallation 必须是合法 file URI：Windows 盘符路径若手工
+    拼成 file://C:/… （宿主名成了盘符），soffice 引导层会失败并弹
+    「配置文件 …\program\bootstrap.ini 已经损坏」——文案指向 ini，
+    实际是 URI 非法（macOS 路径以 / 开头，手工拼恰好是三斜杠合法
+    形式，故该缺陷只在 Windows 暴露）。Path.as_uri() 在两平台都
+    产出正确的 file:/// 形式并对非 ASCII 百分号编码。
+    """
+    return [
+        bin_path.as_posix(),
+        f"-env:UserInstallation={Path(profile_dir).as_uri()}",
+        "--headless", "--norestore", "--nolockcheck",
+        "--convert-to", "pdf:writer_pdf_Export",
+        "--outdir", out_dir.as_posix(),
+        work_copy.as_posix(),
+    ]
+
+
 class SofficeEngine:
     """LibreOffice 无界面转换；独立 UserInstallation → 进程归属本任务，可终止。
 
@@ -184,14 +205,7 @@ class SofficeEngine:
 
         out_dir = out_pdf.parent
         profile = tempfile.mkdtemp(prefix="stamp-soffice-")
-        cmd = [
-            bin_path.as_posix(),
-            f"-env:UserInstallation=file://{profile}",
-            "--headless", "--norestore", "--nolockcheck",
-            "--convert-to", "pdf:writer_pdf_Export",
-            "--outdir", out_dir.as_posix(),
-            work_copy.as_posix(),
-        ]
+        cmd = _soffice_convert_cmd(bin_path, profile, out_dir, work_copy)
         deadline = time.monotonic() + timeout_s
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 creationflags=_NO_WINDOW_FLAGS)

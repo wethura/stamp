@@ -109,5 +109,31 @@ class TestCorruptExpectation(unittest.TestCase):
         self.assertEqual(result.error_kind, ERR_INVALID_PDF)
 
 
+class TestSofficeConvertCmd(unittest.TestCase):
+    """-env:UserInstallation 的 URI 形态（2026-09-18 Windows 实机回归）。
+
+    手工拼 file://{path} 在 Windows 盘符路径上产出非法的 file://C:/…，
+    soffice 引导失败并弹「bootstrap.ini 已经损坏」（文案误导，实为
+    URI 非法）；macOS 路径以 / 开头恰好合法，缺陷只在 Windows 暴露。
+    """
+
+    def test_env_user_installation_is_valid_file_uri(self):
+        import sys
+
+        from processing.word_support.engines import _soffice_convert_cmd
+        with tempfile.TemporaryDirectory(prefix="stamp-soffice-") as profile:
+            cmd = _soffice_convert_cmd(Path("/bin/soffice"), profile,
+                                       Path("/out"), Path("/in.docx"))
+            env = next(a for a in cmd
+                       if a.startswith("-env:UserInstallation="))
+            value = env.split("=", 1)[1]
+            # 三斜杠：file://C:/… 把盘符当宿主名，是本回归的病灶
+            self.assertTrue(value.startswith("file:///"), value)
+            self.assertEqual(value, Path(profile).as_uri())
+            self.assertNotIn("\\", value)
+            if sys.platform == "win32":
+                self.assertRegex(value, r"^file:///[A-Za-z]:/")
+
+
 if __name__ == "__main__":
     unittest.main()
