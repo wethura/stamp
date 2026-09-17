@@ -1,7 +1,8 @@
 """可选的 LibreOffice 转换组件（驱动）管理。
 
 目标场景：用户机器上没有任何可用的 Word 转换引擎。由用户自行决定
-是否下载一份应用自管理的 LibreOffice 到 ~/.stamp_tool/drivers/：
+是否下载一份应用自管理的 LibreOffice，默认装到 ~/.stamp_tool/drivers/，
+也可在确认对话里指定其他磁盘上的空目录：
 
 - Windows：官方 MSI 以「管理员映像」方式解包（msiexec /a）——
   不需要管理员权限、不写注册表、不影响系统安装
@@ -9,10 +10,13 @@
 - Linux：不提供（建议用系统包管理器安装）
 
 完整性：仅允许 HTTPS + 官方域；下载后校验精确字节数与 sha256；
-任何失败/取消都不留半成品（staging + 原子改名）。
+任何失败/取消都不留半成品（staging + 原子改名）。staging 建在
+目标目录同级（同卷才能原子改名）；自定义位置记录在
+~/.stamp_tool/drivers/driver_location.json，供后续启动发现。
 """
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -23,8 +27,12 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
 
+logger = logging.getLogger(__name__)
+
 ALLOWED_HOSTS = {"download.documentfoundation.org"}
 CHUNK = 1 << 20
+# MSI 管理员映像解包后约为安装包的 3~4 倍；按 4 倍预留磁盘
+UNPACK_FACTOR = 4
 
 LIBREOFFICE_VERSION = "26.2.6"
 _BASE = (f"https://download.documentfoundation.org/libreoffice/stable/"
@@ -83,9 +91,34 @@ class DriverManager:
         self._catalog = catalog if catalog is not None else CATALOG
         self._allowed_hosts = (allowed_hosts if allowed_hosts is not None
                                else ALLOWED_HOSTS)
-        self.install_dir = self.base_dir / "libreoffice"
-        self._marker = self.install_dir / "driver.json"
+        self.default_install_dir = self.base_dir / "libreoffice"
+        self._pointer = self.base_dir / "driver_location.json"
         self._downloads = self.base_dir / "downloads"
+        resolved = self._resolve_install_dir()
+        # 发现顺序：当前（指针指向的）位置 → 默认位置
+        self._all_locations = ([resolved, self.default_install_dir]
+                               if resolved != self.default_install_dir
+                               else [self.default_install_dir])
+        self.install_dir = resolved
+
+    @property
+    def _marker(self) -> Path:
+        return self.install_dir / "driver.json"
+
+    def _resolve_install_dir(self) -> Path:
+        """按位置指针还原自定义安装目录；指针失效时回到默认目录。"""
+        try:
+            data = json.loads(self._pointer.read_text(encoding="utf-8"))
+            custom = data.get("install_dir")
+        except (OSError, ValueError, AttributeError):
+            return self.default_install_dir
+        if not custom or not isinstance(custom, str):
+            return self.default_install_dir
+        path = Path(custom)
+        if (path.is_absolute() and path != self.default_install_dir
+                and (path / "driver.json").exists()):
+            return path
+        return self.default_install_dir
 
     # ── 查询 ─────────────────────────────────────────────────────────
 
@@ -101,25 +134,43 @@ class DriverManager:
         out["size_mb"] = round((info.get("size_bytes") or 0) / 1024 / 1024)
         return out
 
+    def _install_candidates(self) -> list:
+        """所有可能存在自管理安装的位置（当前 install_dir 优先）。"""
+        head = [self.install_dir]
+        return head + [d for d in self._all_locations
+                       if d not in head]
+
     def managed_soffice_path(self) -> Optional[Path]:
         """自管理 LibreOffice 的 soffice 可执行文件（未安装返回 None）。"""
-        if not self._marker.exists():
+        for root in self._install_candidates():
+            found = self._soffice_under(root)
+            if found is not None:
+                return found
+        return None
+
+    def _soffice_under(self, root: Path) -> Optional[Path]:
+        if not (root / "driver.json").exists():
             return None
-        recorded = self._load_marker().get("soffice")
+        recorded = self._load_marker(root / "driver.json").get("soffice")
         if recorded:
             candidate = Path(recorded)
             if candidate.exists():
                 return candidate
         # 标记丢失/失效时按布局兜底搜索
         for pattern in ("**/soffice.exe", "**/soffice"):
-            for hit in self.install_dir.glob(pattern):
+            for hit in root.glob(pattern):
                 if hit.is_file():
                     return hit
         return None
 
     def status(self) -> dict:
         soffice = self.managed_soffice_path()
-        marker = self._load_marker()
+        marker = {}
+        if soffice is not None:
+            for root in self._install_candidates():
+                if root in soffice.parents:
+                    marker = self._load_marker(root / "driver.json")
+                    break
         return {
             "installed": soffice is not None,
             "soffice": str(soffice) if soffice else None,
@@ -127,9 +178,9 @@ class DriverManager:
             "size_bytes": marker.get("size_bytes"),
         }
 
-    def _load_marker(self) -> dict:
+    def _load_marker(self, path: Path = None) -> dict:
         try:
-            with open(self._marker, "r", encoding="utf-8") as f:
+            with open(path or self._marker, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
         except (OSError, ValueError):
@@ -138,13 +189,34 @@ class DriverManager:
     # ── 安装 ─────────────────────────────────────────────────────────
 
     def install(self, progress_cb: Optional[Callable] = None,
-                cancel_event: Optional[threading.Event] = None) -> dict:
-        """下载并安装自管理 LibreOffice；成功返回 status()。"""
+                cancel_event: Optional[threading.Event] = None,
+                target_dir: Optional[str] = None) -> dict:
+        """下载并安装自管理 LibreOffice；成功返回 status()。
+
+        target_dir：安装到用户指定的绝对路径目录（须为空目录或旧的
+        自管理安装目录）；缺省装到默认目录。staging 建在目标同级，
+        保证跨盘安装也能原子改名落位。
+        """
         info = self._catalog.get(sys.platform)
         if info is None:
             raise DriverError(
                 "unsupported",
                 "当前平台暂不提供内置下载，请用系统包管理器安装 LibreOffice。")
+
+        if target_dir:
+            target = Path(target_dir).expanduser()
+            if not target.is_absolute():
+                raise DriverError(
+                    "disk", "安装位置必须是绝对路径，"
+                            f"例如 D:\\LibreOffice（收到：{target_dir}）。")
+            self._validate_target(target)
+            if target != self.install_dir:
+                # 记下旧位置：安装成功后统一清理，不留上 GB 的孤儿
+                if self.install_dir not in self._all_locations:
+                    self._all_locations.append(self.install_dir)
+                self.install_dir = target
+        # 未指定目录时沿用当前（指针解析出的）位置；
+        # 旧自定义位置在成功后统一清理。
 
         self._check_cancel(cancel_event)
         self._check_disk(info)
@@ -154,12 +226,14 @@ class DriverManager:
         try:
             self._download(info, archive, progress_cb, cancel_event)
             self._verify(info, archive, progress_cb)
+            self.install_dir.parent.mkdir(parents=True, exist_ok=True)
             staging = Path(tempfile.mkdtemp(prefix="lo-stage-",
-                                            dir=str(self.base_dir)))
+                                            dir=str(self.install_dir.parent)))
             try:
                 soffice = self._extract(info, archive, staging,
                                         progress_cb, cancel_event)
                 self._finalize(staging, soffice, info)
+                self._cleanup_old_locations()
             finally:
                 shutil.rmtree(staging, ignore_errors=True)
         finally:
@@ -174,17 +248,45 @@ class DriverManager:
         if cancel_event is not None and cancel_event.is_set():
             raise DriverError("cancelled", "已取消下载")
 
-    def _check_disk(self, info: dict):
-        need = (info.get("size_bytes") or 0) * 2  # 压缩包 + 解包产物
-        if need <= 0:
+    def _validate_target(self, target: Path):
+        """自定义安装目录只允许空目录或旧的自管理安装（防误删用户数据）。"""
+        if not target.exists():
             return
-        free = shutil.disk_usage(self.base_dir if self.base_dir.exists()
-                                 else self.base_dir.parent).free
-        if free < need:
+        if not any(target.iterdir()):
+            return
+        if self._load_marker(target / "driver.json").get("kind") == "libreoffice":
+            return
+        raise DriverError(
+            "disk",
+            f"所选目录不是空的：\n{target}\n\n"
+            f"请选择一个空目录，组件将直接安装到该目录。")
+
+    @staticmethod
+    def _free_bytes(start: Path) -> int:
+        probe = start
+        while not probe.exists():
+            probe = probe.parent
+        return shutil.disk_usage(probe).free
+
+    def _check_disk(self, info: dict):
+        size = info.get("size_bytes") or 0
+        if size <= 0:
+            return
+        need_archive = size            # 下载包落在 base_dir/downloads
+        need_unpack = size * UNPACK_FACTOR  # staging 解包 → 目标目录
+        free_base = self._free_bytes(self.base_dir)
+        if free_base < need_archive:
             raise DriverError(
                 "disk",
-                f"磁盘空间不足：约需 {need // 1024 // 1024} MB，"
-                f"当前分区可用 {free // 1024 // 1024} MB。")
+                f"磁盘空间不足：下载约需 {need_archive // 1024 // 1024} MB，"
+                f"当前分区可用 {free_base // 1024 // 1024} MB。")
+        free_target = self._free_bytes(self.install_dir)
+        if free_target < need_unpack:
+            raise DriverError(
+                "disk",
+                f"目标分区空间不足：安装约需 {need_unpack // 1024 // 1024} MB"
+                f"（解包后），\n{self.install_dir} 所在分区可用 "
+                f"{free_target // 1024 // 1024} MB。")
 
     def _download(self, info, archive: Path, progress_cb, cancel_event):
         url = info["url"]
@@ -321,8 +423,15 @@ class DriverManager:
     def _finalize(self, staging: Path, soffice_in_staging: Path, info: dict):
         _dest = self.install_dir
         if _dest.exists():
-            shutil.rmtree(_dest)
-        # staging → install_dir 原子化（同分区 rename）
+            # 只覆盖空目录或旧的自管理安装；绝不删用户自己的数据
+            if self._load_marker(_dest / "driver.json").get("kind") == "libreoffice":
+                shutil.rmtree(_dest)
+            elif any(_dest.iterdir()):
+                raise DriverError(
+                    "extract", f"目标目录不为空：{_dest}")
+            else:
+                _dest.rmdir()  # Windows 上目录不能原地替换，先移除空目录
+        # staging → install_dir 原子化（staging 建在同级，同分区 rename）
         os.replace(staging, _dest)
         soffice = _dest / soffice_in_staging.relative_to(staging)
         marker = {
@@ -339,9 +448,38 @@ class DriverManager:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(marker, f, ensure_ascii=False, indent=2)
         os.replace(tmp, self._marker)
+        self._write_pointer()
+
+    def _write_pointer(self):
+        """记录自定义安装位置；装回默认目录时清除指针。"""
+        try:
+            if self.install_dir == self.default_install_dir:
+                self._pointer.unlink(missing_ok=True)
+                return
+            self._pointer.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._pointer.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"install_dir": str(self.install_dir)},
+                          f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self._pointer)
+        except OSError as exc:
+            # 安装本体已就位；指针写失败只是下次启动发现不了该位置
+            logger.warning("写入安装位置指针失败: %s", exc)
+
+    def _cleanup_old_locations(self):
+        """安装成功后移除其他位置上的旧自管理安装（不留上 GB 的孤儿）。"""
+        current = self.install_dir
+        for old in self._install_candidates():
+            if old != current and (old / "driver.json").exists():
+                shutil.rmtree(old, ignore_errors=True)
 
     # ── 卸载 ─────────────────────────────────────────────────────────
 
     def uninstall(self):
-        shutil.rmtree(self.install_dir, ignore_errors=True)
+        for location in self._install_candidates():
+            shutil.rmtree(location, ignore_errors=True)
         shutil.rmtree(self._downloads, ignore_errors=True)
+        try:
+            self._pointer.unlink(missing_ok=True)
+        except OSError:
+            pass

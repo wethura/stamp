@@ -180,6 +180,114 @@ class TestInstallFlow(DriverTestCase):
         self.assertFalse(mgr.install_dir.exists())
 
 
+class TestCustomTargetLocation(DriverTestCase):
+    """自定义安装目录：指针发现 / 非空防护 / 旧位置清理。"""
+
+    def test_custom_dir_installs_and_pointer_resolves(self):
+        mgr = self._manager()
+        self._stub_extract(mgr)
+        target = self.tmp / "其他盘" / "LibreOffice"  # 不存在 → 安装时创建
+        status = mgr.install(target_dir=str(target))
+
+        self.assertTrue(status["installed"])
+        self.assertTrue((target / "driver.json").exists())
+        self.assertIn(target, Path(status["soffice"]).parents)
+        self.assertFalse(mgr.default_install_dir.exists(),
+                         "自定义安装不应占用默认位置")
+        # 指针已写入，下次启动的新实例能据此发现自定义位置
+        pointer = json.loads(
+            (mgr.base_dir / "driver_location.json").read_text("utf-8"))
+        self.assertEqual(pointer["install_dir"], str(target))
+        fresh = self._manager()
+        self.assertEqual(fresh.install_dir, target)
+        self.assertTrue(fresh.status()["installed"])
+        self.assertEqual(fresh.managed_soffice_path(),
+                         mgr.managed_soffice_path())
+        # staging 就近创建并清理，不留半成品
+        self.assertEqual([p for p in self.tmp.rglob("lo-stage-*")], [])
+
+    def test_custom_dir_must_be_absolute(self):
+        mgr = self._manager()
+        self._stub_extract(mgr)
+        with self.assertRaises(DriverError) as ctx:
+            mgr.install(target_dir="relative/dir")
+        self.assertEqual(ctx.exception.kind, "disk")
+
+    def test_custom_dir_rejects_non_empty_and_keeps_user_data(self):
+        mgr = self._manager()
+        target = self.tmp / "occupied"
+        target.mkdir()
+        (target / "重要文件.txt").write_text("data", encoding="utf-8")
+        with self.assertRaises(DriverError) as ctx:
+            mgr.install(target_dir=str(target))
+        self.assertEqual(ctx.exception.kind, "disk")
+        self.assertTrue((target / "重要文件.txt").exists(),
+                        "用户数据绝不能被安装流程触碰")
+
+    def test_reinstall_over_old_custom_location_replaces(self):
+        mgr = self._manager()
+        target = self.tmp / "lo-target"
+        self._stub_extract(mgr)
+        mgr.install(target_dir=str(target))
+        (target / "stale.txt").write_text("x", encoding="utf-8")
+
+        self._stub_extract(mgr)
+        status = mgr.install(target_dir=str(target))
+        self.assertTrue(status["installed"])
+        self.assertTrue((target / "driver.json").exists())
+
+    def test_installing_elsewhere_cleans_old_location(self):
+        mgr = self._manager()
+        self._stub_extract(mgr)
+        mgr.install()  # 先装默认位置
+        self.assertTrue((mgr.default_install_dir / "driver.json").exists())
+
+        custom = self.tmp / "new-place"
+        self._stub_extract(mgr)
+        mgr.install(target_dir=str(custom))
+        self.assertFalse(mgr.default_install_dir.exists(),
+                         "切换位置后旧安装应清理，不留上 GB 孤儿")
+        self.assertTrue((custom / "driver.json").exists())
+
+    def test_reinstall_to_default_clears_pointer(self):
+        mgr = self._manager()
+        custom = self.tmp / "c-lo"
+        self._stub_extract(mgr)
+        mgr.install(target_dir=str(custom))
+        self.assertTrue((mgr.base_dir / "driver_location.json").exists())
+
+        self._stub_extract(mgr)
+        mgr.install(target_dir=str(mgr.default_install_dir))
+        self.assertFalse((mgr.base_dir / "driver_location.json").exists())
+        self.assertFalse(custom.exists())
+        self.assertTrue((mgr.default_install_dir / "driver.json").exists())
+
+    def test_stale_pointer_falls_back_to_default(self):
+        mgr = self._manager()
+        self._stub_extract(mgr)
+        mgr.install()  # 默认位置
+        # 模拟失效指针：自定义目录已被用户手动删除
+        (mgr.base_dir / "driver_location.json").write_text(
+            json.dumps({"install_dir": str(self.tmp / "gone")}),
+            encoding="utf-8")
+
+        fresh = self._manager()
+        self.assertEqual(fresh.install_dir, mgr.default_install_dir)
+        self.assertTrue(fresh.status()["installed"], "默认位置的安装仍可用")
+
+    def test_uninstall_removes_custom_location_and_pointer(self):
+        mgr = self._manager()
+        target = self.tmp / "custom-lo"
+        self._stub_extract(mgr)
+        mgr.install(target_dir=str(target))
+
+        fresh = self._manager()
+        fresh.uninstall()
+        self.assertFalse(target.exists())
+        self.assertFalse((mgr.base_dir / "driver_location.json").exists())
+        self.assertFalse(fresh.status()["installed"])
+
+
 class TestStatusAndEngineIntegration(DriverTestCase):
     def test_marker_with_stale_path_falls_back_to_layout_search(self):
         mgr = self._manager()
