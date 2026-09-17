@@ -1,5 +1,6 @@
-"""设置对话框的引擎展示行构造测试（纯函数，无 GUI）。"""
+"""设置对话框的引擎展示行构造测试（纯函数 + 下载按钮回调 GUI 回归）。"""
 import unittest
+from unittest.mock import MagicMock, patch
 
 from processing.word_support.engines import EngineInfo
 from ui.settings_dialog import AUTO_OPTION, _auto_status, build_engine_rows
@@ -52,6 +53,84 @@ class TestBuildEngineRows(unittest.TestCase):
         self.assertIn("Microsoft Word", status)
         self.assertNotIn("WPS", status)
         self.assertEqual(AUTO_OPTION, "auto")
+
+
+class TestDriverActionCallback(unittest.TestCase):
+    """回归（2026-09-18 用户实机）：下载成功后 run_driver_install 以
+    on_done(True) 回调，设置页的 refresh() 闭包不收参数 → TypeError。
+    需要显示环境；无显示整类跳过。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import customtkinter as ctk
+            cls.root = ctk.CTk()
+            cls.root.geometry("600x400+4000+4000")
+            cls.root.update()
+        except Exception:
+            raise unittest.SkipTest("无可用显示环境")
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.root.destroy()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _find_button(widget, needle: str):
+        for child in widget.winfo_children():
+            try:
+                text = str(child.cget("text"))
+            except Exception:  # noqa: BLE001
+                text = ""
+            if needle in text:
+                return child
+            found = TestDriverActionCallback._find_button(child, needle)
+            if found is not None:
+                return found
+        return None
+
+    def test_download_on_done_receives_installed_flag(self):
+        service = MagicMock()
+        service.probe_all.return_value = {
+            "soffice": EngineInfo("soffice", "LibreOffice (无界面)",
+                                  available=False),
+        }
+        service.current_preference.return_value = None
+
+        driver_cls = MagicMock()
+        driver_cls.return_value.status.return_value = {"installed": False}
+        driver_cls.return_value.catalog_info.return_value = {
+            "version": "26.2.6", "kind": "msi", "size_bytes": 1,
+            "size_mb": 1, "url": "https://download.documentfoundation.org/x",
+        }
+        results = {}
+
+        def fake_run(parent, on_done=None):
+            results["parent_ok"] = parent is not None
+            on_done(True)  # 契约：installed 以一个位置参数回传
+
+        with patch("processing.word_support.driver_manager.DriverManager",
+                   driver_cls), \
+             patch("ui.driver_dialogs.run_driver_install", fake_run):
+            from ui.settings_dialog import SettingsDialog
+            dialog = SettingsDialog(self.root, service)
+            try:
+                button = self._find_button(dialog, "下载组件")
+                self.assertIsNotNone(button, "未安装时应显示「下载组件」按钮")
+                button.invoke()
+                # 走到这里说明 on_done(True) 未抛 TypeError 且行已重建
+                self.assertTrue(results.get("parent_ok"))
+                self.assertGreaterEqual(
+                    service.probe_all.call_count, 2,
+                    "安装完成后应重新探测引擎")
+            finally:
+                try:
+                    dialog.destroy()
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 if __name__ == "__main__":

@@ -154,7 +154,9 @@ class SettingsDialog(ctk.CTkToplevel):
 
         manager = DriverManager()
 
-        def refresh():
+        def refresh(_installed: bool = False):
+            # 也作为 run_driver_install 的 on_done(installed) 回调，
+            # 必须能接收一个位置参数
             self._rebuild_rows(refresh=True)
 
         def locate():
