@@ -275,8 +275,19 @@ jobs:
             echo
             cat .github/release-notes.md
           } > release-body.md
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          body_path: release-body.md
+      - name: Publish release
+        # 不用 softprops/action-gh-release：其 node20 运行时被强制跑在
+        # Node 24 上后资产上传连续失败（Error uploading/saving asset），
+        # gh CLI 不受 action 运行时影响且报错可读
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "清理残留的 release: $tag"
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+            --title "StampTool $tag" --latest \
+            --notes-file release-body.md artifacts/StampTool-*
 
