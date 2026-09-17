@@ -29,11 +29,14 @@ jobs:
           status=0
           python -m unittest discover -s tests -v 2>&1 | tee unittest.log || status=1
           if [ "$status" -ne 0 ]; then
-            grep -E "^(FAIL|ERROR):" unittest.log | while IFS= read -r line; do
-              echo "::error::${line}"
-            done
-            fails=$(grep -cE "^(FAIL|ERROR):" unittest.log || true)
-            if [ "$fails" -eq 0 ]; then
+            # 注意：shell 自带 -e pipefail，grep 无匹配会以 1 退出，
+            # 必须先吞掉再判断，否则诊断分支根本跑不到
+            summary=$(grep -E "^(FAIL|ERROR):" unittest.log || true)
+            if [ -n "$summary" ]; then
+              while IFS= read -r line; do
+                echo "::error::${line}"
+              done <<< "$summary"
+            else
               # 非零退出但没有 FAIL/ERROR 汇总 → 进程级崩溃；上报尾部
               # 日志（匿名 API 可读的注解是唯一的远程可见渠道）
               echo "::error::unittest exited nonzero without FAIL/ERROR summary; tail of unittest.log:"
