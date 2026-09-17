@@ -8,8 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import customtkinter as ctk
-
+from tests.gui_support import shared_ctk_root
 from ui.driver_dialogs import DriverConfirmDialog, DriverProgressDialog
 
 INFO = {
@@ -22,23 +21,8 @@ INFO = {
 
 
 class TestDriverDialogs(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        try:
-            cls.root = ctk.CTk()
-            # 映射到屏幕外：需要真实映射以完成布局，又不闪屏打扰
-            cls.root.geometry("600x400+4000+4000")
-            cls.root.update()
-        except Exception:
-            raise unittest.SkipTest("无可用显示环境")
-
-    @classmethod
-    def tearDownClass(cls):
-        try:
-            cls.root.destroy()
-        except Exception:
-            pass
-
+    # 共享单例根：Windows 上同进程第 5 个 CTk 根会原生崩溃，
+    # 不得在本文件自建根窗口（tests/gui_support.py）
     def _safe_destroy(self, dialog):
         try:
             if dialog.winfo_exists():
@@ -51,7 +35,7 @@ class TestDriverDialogs(unittest.TestCase):
     def test_progress_dialog_constructs_updates_and_cancels(self):
         # 回归：构造即崩（AttributeError: _on_cancel）
         cancel_calls = []
-        dialog = DriverProgressDialog(self.root, 2048,
+        dialog = DriverProgressDialog(shared_ctk_root(), 2048,
                                       on_cancel=lambda: cancel_calls.append(True))
         try:
             self.assertTrue(dialog.winfo_exists())
@@ -73,7 +57,7 @@ class TestDriverDialogs(unittest.TestCase):
     def test_confirm_defaults_to_default_dir_and_ok(self):
         with tempfile.TemporaryDirectory() as td:
             default_dir = str(Path(td) / "libreoffice")
-            dialog = DriverConfirmDialog(self.root, INFO, default_dir)
+            dialog = DriverConfirmDialog(shared_ctk_root(), INFO, default_dir)
             try:
                 self.assertEqual(dialog._path.get(), default_dir)
                 dialog._ok()
@@ -86,7 +70,7 @@ class TestDriverDialogs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             custom = Path(td) / "D盘目录"
             custom.mkdir()
-            dialog = DriverConfirmDialog(self.root, INFO, default_dir=td)
+            dialog = DriverConfirmDialog(shared_ctk_root(), INFO, default_dir=td)
             try:
                 dialog._path.delete(0, "end")
                 dialog._path.insert(0, str(custom))
@@ -101,7 +85,7 @@ class TestDriverDialogs(unittest.TestCase):
             busy = Path(td) / "busy"
             busy.mkdir()
             (busy / "用户文件.txt").write_text("x", encoding="utf-8")
-            dialog = DriverConfirmDialog(self.root, INFO, default_dir=td)
+            dialog = DriverConfirmDialog(shared_ctk_root(), INFO, default_dir=td)
             try:
                 dialog._path.delete(0, "end")
                 dialog._path.insert(0, str(busy))
@@ -114,7 +98,8 @@ class TestDriverDialogs(unittest.TestCase):
                 self._safe_destroy(dialog)
 
     def test_confirm_rejects_relative_and_empty_path(self):
-        dialog = DriverConfirmDialog(self.root, INFO, default_dir="/nowhere/lo")
+        dialog = DriverConfirmDialog(shared_ctk_root(), INFO,
+                                    default_dir="/nowhere/lo")
         try:
             for bad in ("", "relative/path"):
                 dialog._path.delete(0, "end")
@@ -129,7 +114,8 @@ class TestDriverDialogs(unittest.TestCase):
             self._safe_destroy(dialog)
 
     def test_confirm_cancel_yields_not_confirmed(self):
-        dialog = DriverConfirmDialog(self.root, INFO, default_dir="/nowhere/lo")
+        dialog = DriverConfirmDialog(shared_ctk_root(), INFO,
+                                    default_dir="/nowhere/lo")
         dialog._cancel()
         self.assertFalse(dialog.confirmed)
 

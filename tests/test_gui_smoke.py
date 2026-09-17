@@ -39,6 +39,11 @@ class TestGuiSmoke(unittest.TestCase):
             cls.root = ctk.CTk()
             # 映射到屏幕外：winfo 尺寸/渲染依赖真实映射，又不闪屏打扰
             cls.root.geometry("1200x800+4000+4000")
+            # 接管默认根身份：预览画布的 PhotoImage 隐式绑定
+            # tkinter._default_root，必须建在本类自己的解释器里
+            #（销毁后 tests.gui_support 的共享根会自动补位）
+            import tkinter as tk
+            tk._default_root = cls.root
         except Exception:
             raise unittest.SkipTest("无可用显示环境")
         cls.app = App()

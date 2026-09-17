@@ -2,9 +2,9 @@
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
-import customtkinter as ctk
 from PIL import Image
 from processing.stamp_manager import StampManager
+from tests.gui_support import shared_ctk_root
 from ui.stamp_library_dialog import StampLibraryDialog
 
 
@@ -14,8 +14,7 @@ class TestStampLibraryDialog(unittest.TestCase):
             manager = StampManager(folder)
             first = manager.add_stamp('公章', Image.new('RGBA', (60, 60), 'red'))
             second = manager.add_stamp('财务章', Image.new('RGBA', (90, 30), 'red'))
-            root = ctk.CTk()
-            root.update()
+            root = shared_ctk_root()
             changed = MagicMock()
             deleted = MagicMock(side_effect=lambda sid, parent=None: manager.delete_stamp(sid))
             dialog = StampLibraryDialog(root, manager, changed, deleted)
@@ -58,4 +57,3 @@ class TestStampLibraryDialog(unittest.TestCase):
                 self.assertEqual(manager.list_stamps(), [])
             finally:
                 dialog.destroy()
-                root.destroy()

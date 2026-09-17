@@ -65,6 +65,10 @@ class TestGuiWordFlowEndToEnd(unittest.TestCase):
         try:
             cls.root = ctk.CTk()
             cls.root.geometry("1200x800+4000+4000")
+            # 接管默认根身份（同 test_gui_smoke：PhotoImage 隐式绑定
+            # 默认根；销毁后共享根自动补位）
+            import tkinter as tk
+            tk._default_root = cls.root
         except Exception:
             raise unittest.SkipTest("无可用显示环境")
 

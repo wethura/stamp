@@ -58,25 +58,9 @@ class TestBuildEngineRows(unittest.TestCase):
 class TestDriverActionCallback(unittest.TestCase):
     """回归（2026-09-18 用户实机）：下载成功后 run_driver_install 以
     on_done(True) 回调，设置页的 refresh() 闭包不收参数 → TypeError。
-    需要显示环境；无显示整类跳过。
+    需要显示环境；无显示跳过。共享单例根，不自建（Windows 多 CTk
+    根会原生崩溃，见 tests/gui_support.py）。
     """
-
-    @classmethod
-    def setUpClass(cls):
-        try:
-            import customtkinter as ctk
-            cls.root = ctk.CTk()
-            cls.root.geometry("600x400+4000+4000")
-            cls.root.update()
-        except Exception:
-            raise unittest.SkipTest("无可用显示环境")
-
-    @classmethod
-    def tearDownClass(cls):
-        try:
-            cls.root.destroy()
-        except Exception:
-            pass
 
     @staticmethod
     def _find_button(widget, needle: str):
@@ -93,6 +77,9 @@ class TestDriverActionCallback(unittest.TestCase):
         return None
 
     def test_download_on_done_receives_installed_flag(self):
+        from tests.gui_support import shared_ctk_root
+        shared_ctk_root()  # 无显示环境 → SkipTest
+
         service = MagicMock()
         service.probe_all.return_value = {
             "soffice": EngineInfo("soffice", "LibreOffice (无界面)",
@@ -116,7 +103,7 @@ class TestDriverActionCallback(unittest.TestCase):
                    driver_cls), \
              patch("ui.driver_dialogs.run_driver_install", fake_run):
             from ui.settings_dialog import SettingsDialog
-            dialog = SettingsDialog(self.root, service)
+            dialog = SettingsDialog(shared_ctk_root(), service)
             try:
                 button = self._find_button(dialog, "下载组件")
                 self.assertIsNotNone(button, "未安装时应显示「下载组件」按钮")
