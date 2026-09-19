@@ -15,6 +15,21 @@ from ui.stamp_library_dialog import StampLibraryDialog
 from ui.theme import Colors, Fonts, Spacing, PANEL_WIDTH
 
 
+def _widget_in_scrollable(widget, frame) -> bool:
+    """widget 是否位于 frame 的滚动画布内（含画布自身）。
+
+    不能调用 CTkScrollableFrame.check_if_master_is_canvas：该方法在
+    customtkinter 6.0 中被改名为私有 _check_if_valid_scroll，跨版本调用
+    必然 AttributeError（Windows 打包版曾因此每次滚轮都崩溃）。
+    """
+    canvas = getattr(frame, "_parent_canvas", None)
+    while widget is not None:
+        if widget is canvas:
+            return True
+        widget = getattr(widget, "master", None)
+    return False
+
+
 class StampListScrollFrame(ctk.CTkScrollableFrame):
     """Stamp card list that hands the wheel to the outer panel at scroll bounds.
 
@@ -27,7 +42,7 @@ class StampListScrollFrame(ctk.CTkScrollableFrame):
         self._on_wheel_overflow = on_wheel_overflow
 
     def _mouse_wheel_all(self, event):
-        if not self.check_if_master_is_canvas(event.widget):
+        if not _widget_in_scrollable(event.widget, self):
             return
 
         if sys.platform.startswith("win"):
@@ -79,7 +94,7 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         once, since CustomTkinter dispatches wheel events globally.
         """
         inner = getattr(self, "_scroll_frame", None)
-        if inner is not None and self.check_if_master_is_canvas(event.widget):
+        if inner is not None and _widget_in_scrollable(event.widget, self):
             if str(event.widget).startswith(str(inner._parent_canvas)):
                 return
         super()._mouse_wheel_all(event)

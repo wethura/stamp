@@ -4,17 +4,83 @@ import tkinter as tk
 import customtkinter as ctk
 from unittest.mock import MagicMock, patch
 
+from tests.gui_support import shared_ctk_root
 from ui.controls_panel import ControlsPanel
 from processing.stamp_manager import StampManager, StampData
 from processing.stamp_instance import StampInstance
+
+
+def simulate_ctk6():
+    """把 5.2 的公开方法替换成一调用即炸的哨兵，模拟 6.0 的缺失。
+
+    6.0 把 check_if_master_is_canvas 改名成私有 _check_if_valid_scroll，
+    Windows 打包版曾因装到 6.0.0 导致每次滚轮都 AttributeError 并连环
+    弹「程序遇到问题」模态框。create=True 使其同样适用于已装 6.x 的
+    环境（属性本就不存在时补一个哨兵即可）。
+    """
+    return patch.object(ctk.CTkScrollableFrame, "check_if_master_is_canvas",
+                        side_effect=AssertionError("不得依赖 5.2 的方法名"),
+                        create=True)
+
+
+class TestWheelScrollChain(unittest.TestCase):
+    """印章列表 ↔ 外层面板的滚轮链路（回归：customtkinter 跨版本崩溃）。"""
+
+    def setUp(self):
+        # 按钮图标是 lru_cache 的 CTkImage，绑定首个 root——必须复用
+        # 进程级共享根，逐测自建 root 会触发 pyimage 跨根失效。
+        self.root = shared_ctk_root()
+        self.panel = ControlsPanel(self.root)
+        self.panel.pack()
+        self.panel.update_idletasks()
+
+    def tearDown(self):
+        self.panel.destroy()
+
+    @staticmethod
+    def _event_on(widget, delta=120):
+        ev = MagicMock()
+        ev.widget = widget
+        ev.delta = delta
+        return ev
+
+    def test_inner_list_ignores_wheel_outside_itself(self):
+        """事件落在外层控件上：印章列表不响应、不报错、不依赖库内部方法。"""
+        with simulate_ctk6():
+            self.panel._scroll_frame._mouse_wheel_all(
+                self._event_on(self.panel._size_slider))
+        self.assertEqual(self.panel._scroll_frame._parent_canvas.yview(),
+                         (0.0, 1.0))
+
+    def test_panel_skips_wheel_inside_stamp_list(self):
+        """事件落在印章列表内：外层面板让位，且不得调用库的 5.2 方法名。"""
+        inner = self.panel._scroll_frame
+        with simulate_ctk6():
+            self.panel._mouse_wheel_all(
+                self._event_on(inner._parent_canvas))
+
+    def test_list_overflow_chains_to_outer_panel(self):
+        """列表滚到边界后增量交给外层面板继续滚动。
+
+        事件向下滚（delta<0，Windows 一格 = -120）且列表已在底部
+        不可再滚时，外层面板接管同一方向的滚动。
+        """
+        ctk.CTkFrame(self.panel, height=2000, fg_color="transparent").grid(
+            row=50, column=0, sticky="ew")
+        self.root.update()
+        before = self.panel._parent_canvas.yview()
+        inner = self.panel._scroll_frame
+        inner._mouse_wheel_all(self._event_on(inner._parent_canvas, delta=-120))
+        self.root.update()
+        after = self.panel._parent_canvas.yview()
+        self.assertGreater(after[0], before[0])
 
 
 class TestDeleteButton(unittest.TestCase):
     """删除按钮相关测试"""
 
     def setUp(self):
-        self.root = tk.Tk()
-        self.root.withdraw()
+        self.root = shared_ctk_root()
         self.panel = ControlsPanel(self.root)
         self.panel.pack()
         self.panel.update_idletasks()
@@ -23,7 +89,7 @@ class TestDeleteButton(unittest.TestCase):
         self.panel.set_stamp_manager(self.mock_manager)
 
     def tearDown(self):
-        self.root.destroy()
+        self.panel.destroy()
 
     def _create_mock_stamp(self, stamp_id, name="测试章"):
         stamp = MagicMock(spec=StampData)
