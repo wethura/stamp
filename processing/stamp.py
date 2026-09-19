@@ -28,7 +28,9 @@ def remove_white_background(img: Image.Image) -> Image.Image:
     r, g, b, a = arr[:,:,0], arr[:,:,1], arr[:,:,2], arr[:,:,3]
     mx = np.maximum(np.maximum(r, g), b)
     mn = np.minimum(np.minimum(r, g), b)
-    saturation = np.where(mx > 0, (mx - mn) / mx, 0)
+    # mx>0 掩码下安全除法：纯黑像素 mx=0 时 0/0 产生 nan 并告警
+    # （np.where 两分支都会求值，告警拦不住），故用受掩码的 divide。
+    saturation = np.divide(mx - mn, mx, out=np.zeros_like(mx), where=mx > 0)
     brightness = mx / 255.0
     mask = (saturation < 0.35) & (brightness > 0.65) & (a == 255)
     result = arr.astype(np.uint8)
