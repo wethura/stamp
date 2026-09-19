@@ -284,8 +284,17 @@ def _install_tk_callback_logging(root):
     重定向到日志，补上这个观察黑洞（sys.excepthook 只覆盖主流程，
     覆盖不到 Tk 事件/after 回调）。
     """
+    shown_errors = set()
+
     def report(exc_type, exc, tb, *_args):
         logging.critical("Tk 回调异常", exc_info=(exc_type, exc, tb))
+        # 同一异常只弹一次窗：滚轮等高频回调每格都触发，重复模态框会
+        # 连环轰炸用户到应用不可操作（Windows 无上限装到 customtkinter
+        # 6.0.0 时实况）。后续同款异常仍落日志，不再打扰。
+        key = (exc_type, str(exc))
+        if key in shown_errors:
+            return
+        shown_errors.add(key)
         try:
             from tkinter import messagebox
             messagebox.showerror(
