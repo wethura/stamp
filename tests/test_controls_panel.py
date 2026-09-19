@@ -22,25 +22,45 @@ def simulate_ctk6():
                         create=True)
 
 
+_MODULE_ROOT = None
+
+
+def setUpModule():
+    """全模块共用一个 root。
+
+    两个都踩过的坑：
+    - 逐测自建 root：反复建/销毁根会喂坏 customtkinter 的全局追踪器
+      （AppearanceMode/Scaling 的自续订 after 循环），轮次够多后
+      update() 永不排空（本模块 8 测实测空转）；
+    - 改用 tests.gui_support 的共享根：会把共享根的创建提前到全量
+      顺序 1 号位，与后续 gui_smoke/word_flow 的根生命周期叠加后，
+      stamp_library_dialog 在共享根上 update() 空转、全量套件挂起
+      （d9a1099 即可复现该三件套，属既有脆弱点）。
+    模块级单一根两条都避开；图标改造（lru_cache CTkImage 绑首个
+    root）落地时同样受益于单一根，但迁共享根需连同追踪器问题解决。
+    """
+    global _MODULE_ROOT
+    _MODULE_ROOT = tk.Tk()
+    _MODULE_ROOT.withdraw()
+
+
+def tearDownModule():
+    global _MODULE_ROOT
+    _MODULE_ROOT.destroy()
+    _MODULE_ROOT = None
+
+
 class TestWheelScrollChain(unittest.TestCase):
     """印章列表 ↔ 外层面板的滚轮链路（回归：customtkinter 跨版本崩溃）。"""
 
     def setUp(self):
-        # 不用 tests.gui_support 的共享根：本模块在全量顺序里排第 1，
-        # 由它首发共享根会让 CTk 全局追踪器（AppearanceMode/Scaling
-        # 的自续订 after 循环）挂上去，与后续 gui_smoke/word_flow 的
-        # 第二、第三根生命周期叠加后，共享根上的对话框 update() 会
-        # 永不排空（d9a1099 即可复现）。逐测自建 root 维持既有动力学。
-        # 注意：图标改造（lru_cache 的 CTkImage 绑定首个 root）落地时
-        # 需要迁共享根，届时必须连同上述追踪器问题一起解决。
-        self.root = tk.Tk()
-        self.root.withdraw()
+        self.root = _MODULE_ROOT
         self.panel = ControlsPanel(self.root)
         self.panel.pack()
         self.panel.update_idletasks()
 
     def tearDown(self):
-        self.root.destroy()
+        self.panel.destroy()
 
     @staticmethod
     def _event_on(widget, delta=120):
@@ -85,8 +105,7 @@ class TestDeleteButton(unittest.TestCase):
     """删除按钮相关测试"""
 
     def setUp(self):
-        self.root = tk.Tk()
-        self.root.withdraw()
+        self.root = _MODULE_ROOT
         self.panel = ControlsPanel(self.root)
         self.panel.pack()
         self.panel.update_idletasks()
@@ -95,7 +114,7 @@ class TestDeleteButton(unittest.TestCase):
         self.panel.set_stamp_manager(self.mock_manager)
 
     def tearDown(self):
-        self.root.destroy()
+        self.panel.destroy()
 
     def _create_mock_stamp(self, stamp_id, name="测试章"):
         stamp = MagicMock(spec=StampData)
