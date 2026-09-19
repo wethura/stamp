@@ -181,10 +181,12 @@ class TestOnFileDropped(unittest.TestCase):
             os.mkdir(path)
             target = os.path.join(path, "a b.pdf")
             open(target, "w").close()
+            dropped = target.replace(os.sep, "/")
             app = self.make_app()
-            app.on_file_dropped("{" + target.replace(os.sep, "/") + "}")
+            app.on_file_dropped("{" + dropped + "}")
             app._load_document.assert_called_once()
-            self.assertEqual(app._load_document.call_args[0][0], target)
+            # 解析保留拖入数据的原始分隔符（正斜杠在 Windows 一样可用）
+            self.assertEqual(app._load_document.call_args[0][0], dropped)
 
     @patch("app.show_toast")
     def test_multiple_files_rejected(self, show_toast):
