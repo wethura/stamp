@@ -11,7 +11,8 @@ import customtkinter as ctk
 
 from processing.word_support.engines import EngineInfo
 from processing.word_support.service import ConversionService, get_shared_service
-from ui.theme import Colors, Fonts
+from ui.icons import get_icon
+from ui.theme import Buttons, Colors, Fonts
 
 AUTO_OPTION = "auto"
 
@@ -76,23 +77,28 @@ class SettingsDialog(ctk.CTkToplevel):
         # ── 底部操作 ─────────────────────────────────────────────────
         bottom = ctk.CTkFrame(self, fg_color="transparent")
         bottom.pack(fill="x", padx=24, pady=(0, 16))
-        ctk.CTkButton(bottom, text="↻  重新检测", width=104, height=36,
+        ctk.CTkButton(bottom, text=" 重新检测", width=110, height=Buttons.HEIGHT_DIALOG,
+                      corner_radius=Buttons.RADIUS,
                       fg_color="transparent", border_width=1,
                       border_color=Colors.BORDER_SUBTLE,
                       hover_color=Colors.SURFACE_OVERLAY,
                       text_color=Colors.TEXT_PRIMARY,
+                      image=get_icon("refresh", Buttons.ICON_SM),
+                      compound="left",
                       command=lambda: self._rebuild_rows(refresh=True)
                       ).pack(side="left")
-        ctk.CTkButton(bottom, text="取消", width=88, height=36,
+        ctk.CTkButton(bottom, text="取消", width=88, height=Buttons.HEIGHT_DIALOG,
+                      corner_radius=Buttons.RADIUS,
                       fg_color="transparent", border_width=1,
                       border_color=Colors.BORDER_SUBTLE,
                       hover_color=Colors.SURFACE_OVERLAY,
                       text_color=Colors.TEXT_SECONDARY,
                       command=self.destroy).pack(side="right")
-        ctk.CTkButton(bottom, text="保存", width=88, height=36,
+        ctk.CTkButton(bottom, text="保存", width=88, height=Buttons.HEIGHT_DIALOG,
+                      corner_radius=Buttons.RADIUS,
                       fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
                       text_color="white",
-                      font=(Fonts.FAMILY, Fonts.BODY_SIZE, "bold"),
+                      font=(Fonts.FAMILY, Fonts.BODY_SIZE),
                       command=self._save).pack(side="right", padx=(0, 8))
 
         self.transient(parent)
@@ -118,7 +124,7 @@ class SettingsDialog(ctk.CTkToplevel):
         ctk.CTkRadioButton(auto_row, text="自动（推荐）", variable=self._choice,
                            value=AUTO_OPTION, height=28,
                            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
-                           font=(Fonts.FAMILY, Fonts.BODY_SIZE, "bold"),
+                           font=(Fonts.FAMILY, Fonts.BODY_SIZE),
                            text_color=Colors.TEXT_PRIMARY).pack(anchor="w")
         ctk.CTkLabel(self._rows_frame, text=_auto_status(rows),
                      font=(Fonts.FAMILY, Fonts.SMALL_SIZE),

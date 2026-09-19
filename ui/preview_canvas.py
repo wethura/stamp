@@ -145,7 +145,8 @@ class PreviewCanvas(ctk.CTkFrame):
         self.canvas.bind("<Button-3>", self._on_right_click)
 
         self._context_menu = tk.Menu(self, tearoff=0)
-        self._context_menu.add_command(label="删除", command=self._delete_selected)
+        self._context_menu.add_command(label="删除印章", accelerator="Del",
+                                       command=self._delete_selected)
 
         # Focus on hover for keyboard events
         self.canvas.bind("<Enter>", lambda e: self.canvas.focus_set())

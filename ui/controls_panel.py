@@ -10,9 +10,11 @@ import customtkinter as ctk
 from processing.stamp import load_stamp
 from processing.stamp_manager import StampData
 from processing.stamp_instance import StampInstanceManager
+from ui.feedback import Tooltip
+from ui.icons import get_icon
 from ui.stamp_card import StampCard
 from ui.stamp_library_dialog import StampLibraryDialog
-from ui.theme import Colors, Fonts, Spacing, PANEL_WIDTH
+from ui.theme import Buttons, Colors, Fonts, Spacing, PANEL_WIDTH
 
 
 def _widget_in_scrollable(widget, frame) -> bool:
@@ -140,26 +142,33 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         library_actions.grid(row=row, column=0, padx=Spacing.PAD_LG,
                              pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
         library_actions.grid_columnconfigure(0, weight=1)
+        # 与工具栏同一套幽灵语言：导入是本区唯一的强调（印章红），
+        # 管理保持安静；不再混用「描边 + 粗体 + 浅底」三种喊法。
         import_btn = ctk.CTkButton(
             library_actions,
-            text="＋  导入印章",
-            fg_color=Colors.SURFACE_RAISED,
-            hover_color=Colors.SURFACE_OVERLAY,
+            text=" 导入印章",
+            image=get_icon("plus", Buttons.ICON, Colors.PRIMARY),
+            compound="left", anchor="w",
+            fg_color="transparent",
+            hover_color=Colors.SURFACE_RAISED,
             text_color=Colors.PRIMARY,
-            border_width=1, border_color=Colors.BORDER_SUBTLE,
-            font=(Fonts.FAMILY, Fonts.BODY_SIZE, "bold"),
-            height=40,
-            corner_radius=6,
+            height=Buttons.HEIGHT,
+            corner_radius=Buttons.RADIUS,
+            font=(Fonts.FAMILY, Fonts.BODY_SIZE),
             command=self._import_stamp,
         )
         import_btn.grid(row=0, column=0, padx=(0, Spacing.PAD_SM), sticky="ew")
-        ctk.CTkButton(
-            library_actions, text="管理印章", width=88, height=40,
-            corner_radius=6, fg_color=Colors.SURFACE_RAISED,
-            hover_color=Colors.SURFACE_OVERLAY, text_color=Colors.TEXT_SECONDARY,
-            border_width=1, border_color=Colors.BORDER_SUBTLE,
+        manage_btn = ctk.CTkButton(
+            library_actions, text=" 管理印章", width=96, height=Buttons.HEIGHT,
+            image=get_icon("grid", Buttons.ICON, Colors.TEXT_SECONDARY),
+            compound="left",
+            corner_radius=Buttons.RADIUS, fg_color="transparent",
+            hover_color=Colors.SURFACE_RAISED, text_color=Colors.TEXT_SECONDARY,
             font=(Fonts.FAMILY, Fonts.BODY_SIZE), command=self._manage_stamps,
-        ).grid(row=0, column=1)
+        )
+        manage_btn.grid(row=0, column=1)
+        Tooltip(import_btn, "选择一张透明底 PNG 加入印章库")
+        Tooltip(manage_btn, "重命名、替换图片或删除印章")
         row += 1
 
         # Keep the library viewport roomy so compact cards reveal more stamps.
@@ -252,7 +261,7 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         return slider, val_label
 
     def _build_rotation_row(self, row):
-        """Create rotation controls: left 90°, input field, right 90°."""
+        """Create rotation controls: icon buttons for ±90° + free angle entry."""
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.grid(row=row, column=0, padx=Spacing.PAD_LG, sticky="ew")
         header.grid_columnconfigure(1, weight=1)
@@ -268,35 +277,44 @@ class ControlsPanel(ctk.CTkScrollableFrame):
         btn_frame.grid(row=row + 1, column=0, padx=Spacing.PAD_LG, pady=(Spacing.PAD_XS, Spacing.PAD_SM), sticky="ew")
         btn_frame.grid_columnconfigure(1, weight=1)
 
-        left_btn = ctk.CTkButton(
-            btn_frame, text="◀ 90°", width=50, height=28,
+        self._rotate_left_btn = ctk.CTkButton(
+            btn_frame, text="", width=38, height=Buttons.HEIGHT_SM,
             fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
             text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SMALL_SIZE), corner_radius=6,
+            image=get_icon("rotate-ccw", Buttons.ICON_SM),
+            corner_radius=Buttons.RADIUS_SM,
             command=self._rotate_left,
         )
-        left_btn.grid(row=0, column=0, padx=(0, Spacing.PAD_XS))
+        self._rotate_left_btn.grid(row=0, column=0, padx=(0, Spacing.PAD_XS))
+        Tooltip(self._rotate_left_btn, "逆时针旋转 90°")
 
         self._rotation_entry = ctk.CTkEntry(
-            btn_frame, width=60, height=28,
+            btn_frame, width=60, height=Buttons.HEIGHT_SM,
             font=(Fonts.FAMILY, Fonts.BODY_SIZE),
             fg_color=Colors.SURFACE_RAISED, text_color=Colors.TEXT_PRIMARY,
             border_width=1, border_color=Colors.SURFACE_OVERLAY,
-            corner_radius=6, justify="center",
+            corner_radius=Buttons.RADIUS_SM, justify="center",
         )
         self._rotation_entry.insert(0, "0")
         self._rotation_entry.grid(row=0, column=1, sticky="ew")
         self._rotation_entry.bind("<Return>", self._on_rotation_entry)
         self._rotation_entry.bind("<FocusOut>", self._on_rotation_entry)
+        Tooltip(self._rotation_entry, "输入 0–360 的任意角度，回车生效")
 
-        right_btn = ctk.CTkButton(
-            btn_frame, text="90° ▶", width=50, height=28,
+        ctk.CTkLabel(btn_frame, text="°", text_color=Colors.TEXT_SECONDARY,
+                     font=(Fonts.FAMILY, Fonts.BODY_SIZE)
+                     ).grid(row=0, column=2, sticky="w")
+
+        self._rotate_right_btn = ctk.CTkButton(
+            btn_frame, text="", width=38, height=Buttons.HEIGHT_SM,
             fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
             text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SMALL_SIZE), corner_radius=6,
+            image=get_icon("rotate-cw", Buttons.ICON_SM),
+            corner_radius=Buttons.RADIUS_SM,
             command=self._rotate_right,
         )
-        right_btn.grid(row=0, column=2, padx=(Spacing.PAD_XS, 0))
+        self._rotate_right_btn.grid(row=0, column=3, padx=(Spacing.PAD_XS, 0))
+        Tooltip(self._rotate_right_btn, "顺时针旋转 90°")
 
     def _rotate_left(self):
         if not self._editing_instance_id:
@@ -391,12 +409,18 @@ class ControlsPanel(ctk.CTkScrollableFrame):
 
         stamps = self._stamp_manager.list_stamps()
         if not stamps:
+            empty = ctk.CTkFrame(self._scroll_frame, fg_color="transparent")
+            empty.grid(row=0, column=0, columnspan=2, sticky="ew")
+            empty.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
-                self._scroll_frame, text="尚未添加印章\n\n导入一张印章图片，建立你的印章库",
+                empty, text="", image=get_icon("seal", 36, Colors.TEXT_TERTIARY),
+            ).grid(row=0, column=0, pady=(24, 6))
+            ctk.CTkLabel(
+                empty, text="还没有印章\n导入一张透明底 PNG，建立你的印章库",
                 font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
-                text_color=Colors.TEXT_SECONDARY, height=156,
-                wraplength=240,
-            ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=8)
+                text_color=Colors.TEXT_SECONDARY,
+                wraplength=240, justify="center",
+            ).grid(row=1, column=0, pady=(0, 20))
         for idx, stamp in enumerate(stamps):
             row_idx = idx // 2
             col_idx = idx % 2
@@ -407,6 +431,7 @@ class ControlsPanel(ctk.CTkScrollableFrame):
                 on_drag_start=self._start_stamp_drag,
             )
             card.grid(row=row_idx, column=col_idx, padx=Spacing.PAD_XS, pady=Spacing.PAD_XS, sticky="nsew")
+            Tooltip(card, "双击添加到当前页 · 按住可拖到文档上")
 
         self._update_edit_controls()
 
@@ -508,8 +533,15 @@ class ControlsPanel(ctk.CTkScrollableFrame):
     # ═══════════════════════════════════════════════════════════════════
 
     def _update_edit_controls(self):
+        edit_widgets = (self._size_slider, self._opacity_slider,
+                        self._rotation_entry, self._rotate_left_btn,
+                        self._rotate_right_btn)
         if not self._editing_instance_id or not self._instance_manager:
-            self._editing_label.configure(text="双击模板添加印章到页面", text_color=Colors.TEXT_SECONDARY)
+            # 未选中印章：调整控件置灰，避免「拖了没反应」的错觉
+            self._editing_label.configure(text="双击模板添加印章到页面",
+                                          text_color=Colors.TEXT_SECONDARY)
+            for widget in edit_widgets:
+                widget.configure(state="disabled")
             self._size_slider.set(20)
             self._size_label.configure(text="20%")
             self._opacity_slider.set(68)
@@ -517,6 +549,9 @@ class ControlsPanel(ctk.CTkScrollableFrame):
             self._rotation_entry.delete(0, "end")
             self._rotation_entry.insert(0, "0")
             return
+
+        for widget in edit_widgets:
+            widget.configure(state="normal")
 
         inst = self._instance_manager.get_instance(self._editing_instance_id)
         if inst is None:

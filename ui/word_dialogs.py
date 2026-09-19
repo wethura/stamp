@@ -119,7 +119,7 @@ def choose_no_engine_action(parent, download_info: dict = None) -> str:
                  text_color=Colors.TEXT_PRIMARY).pack(pady=(20, 4))
     ctk.CTkLabel(dialog,
                  text="自动检测可能遗漏，或本机尚未安装。\n"
-                      "可稍后在 ⚙ 设置 → Word 转换引擎 中：\n"
+                      "可稍后在「设置」→ Word 转换引擎 中：\n"
                       "指定已安装的 LibreOffice 目录，或下载内置转换组件。",
                  font=(Fonts.FAMILY, Fonts.SMALL_SIZE),
                  text_color=Colors.TEXT_SECONDARY,

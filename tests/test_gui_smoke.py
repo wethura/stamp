@@ -221,9 +221,18 @@ class TestGuiSmoke(unittest.TestCase):
         self.app.stamp_manager = mgr
         self.window.controls.set_stamp_manager(mgr)
         try:
-            children = self.window.controls._scroll_frame.winfo_children()
-            self.assertTrue(any("尚未添加印章" in c.cget("text")
-                                for c in children if hasattr(c, "cget")))
+            import customtkinter as ctk
+
+            def _labels(widget):
+                out = [c for c in widget.winfo_children()
+                       if isinstance(c, ctk.CTkLabel)]
+                for c in widget.winfo_children():
+                    out.extend(_labels(c))
+                return out
+
+            labels = _labels(self.window.controls._scroll_frame)
+            self.assertTrue(any("还没有印章" in c.cget("text")
+                                for c in labels))
         finally:
             self.app.stamp_manager = old
             self.window.controls.set_stamp_manager(old)

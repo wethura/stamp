@@ -258,6 +258,8 @@ class TestControlsPanelTemplateLibrary(unittest.TestCase):
         panel._opacity_label = MagicMock()
         panel._opacity_slider = MagicMock()
         panel._rotation_entry = MagicMock()
+        panel._rotate_left_btn = MagicMock()
+        panel._rotate_right_btn = MagicMock()
         panel._stamp_manager = MagicMock()
         panel._instance_manager = MagicMock()
 

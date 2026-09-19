@@ -49,6 +49,8 @@ class Colors:
     GOLD = "#A07850"                  # Section headings
     BORDER_SUBTLE = "#E0DDD8"         # 1px dividers between sections
     DANGER = "#E04040"                # Delete / destructive actions
+    SUCCESS = "#3E8E5A"               # Success feedback (toast / states)
+    ICON_DISABLED = "#C7C3BC"         # Disabled-state icons on buttons
 
     # ── Selection ────────────────────────────────────────────────────
     ACCENT_SELECTION = "#B63D32"
@@ -101,6 +103,18 @@ class Spacing:
 # ── Layout Constants ──────────────────────────────────────────────────
 
 PANEL_WIDTH = 304
+
+
+class Buttons:
+    """统一控件尺寸 — 全应用同一套高度/圆角，不再逐处手调。"""
+
+    HEIGHT = 40            # 主窗工具栏/侧栏按钮
+    HEIGHT_DIALOG = 38     # 对话框按钮
+    HEIGHT_SM = 28         # 紧凑按钮（页导航、行内小操作）
+    RADIUS = 8             # 按钮圆角
+    RADIUS_SM = 6          # 输入框/紧凑按钮圆角
+    ICON = 18              # 按钮内图标边长（逻辑像素）
+    ICON_SM = 14           # 小按钮图标边长
 
 
 # ── Theme Initialization ──────────────────────────────────────────────

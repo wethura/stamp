@@ -6,22 +6,41 @@ from queue import Empty, Queue
 from tkinter import filedialog, messagebox
 from PIL import Image
 from typing import Optional, List, Dict
+import atexit
 import os
 import shlex
 import shutil
+import subprocess
+import sys
+import tempfile
 
 from processing import HandlerRegistry
 from processing.base import DocumentHandler
 from processing.handlers.pdf_handler import PDFHandler
+from processing.printing import print_file
 from processing.handlers.word_handler import WordHandler
 from processing.stamp_manager import StampManager
 from processing.stamp_instance import StampInstance, StampInstanceManager
 from processing.stamp import apply_opacity
 from processing.word_support.errors import ConversionError
 from processing.word_support.service import get_shared_service
+from ui.feedback import show_toast
 from ui.word_dialogs import ConversionProgressDialog, choose_engine
 
 logger = logging.getLogger(__name__)
+
+
+def _reveal_in_file_manager(path: str):
+    """在访达 / 资源管理器中高亮文件（Toast 的「打开所在文件夹」动作）。"""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", path])
+        elif os.name == "nt":
+            subprocess.Popen(["explorer", f"/select,{os.path.normpath(path)}"])
+        else:
+            subprocess.Popen(["xdg-open", os.path.dirname(path) or "."])
+    except Exception:  # noqa: BLE001  定位失败只记日志，不影响主流程
+        logger.warning("打开文件所在位置失败: %s", path, exc_info=True)
 
 
 class App:
@@ -47,6 +66,11 @@ class App:
         self._flow_token = 0
         self._flow_lock = threading.Lock()
         self._flow_guards: Dict[int, object] = {}
+
+        # 打印导出的会话临时目录（惰性创建，进程退出时统一清理）
+        self._print_dir: Optional[str] = None
+        # 打印提交互斥：避免连点按钮唤起多个系统打印面板
+        self._print_busy = False
 
     # --- 跨线程调度（工作线程 → 主线程） ---
 
@@ -197,6 +221,7 @@ class App:
         self.window.preview.reset_view()
         self.window.set_status(f"已加载: {path}  ({len(pages)} 页)")
         self._refresh_preview()
+        self._update_action_availability()
 
     # --- Word 转换（P2.3/P2.4：后台探测 + 后台转换 + 取消 + 手动 PDF）---
 
@@ -332,7 +357,7 @@ class App:
         if choice == "manual_pdf":
             self._manual_pdf_import()
         else:
-            self.window.set_status("未转换：可在 ⚙ 设置 中指定安装目录或下载组件")
+            self.window.set_status("未转换：可在「设置」中指定安装目录或下载组件")
 
     def _install_converter_driver(self):
         """下载内置 LibreOffice 转换组件（设置页/无引擎弹窗共用入口）。"""
@@ -494,7 +519,14 @@ class App:
         try:
             self._export_with_instances(out_path)
             self.window.set_status(f"已导出: {out_path}")
-            messagebox.showinfo("导出成功", f"已保存到:\n{out_path}")
+            # 成功是结果告知，用非阻塞 Toast（可一键定位文件），不再弹模态框
+            show_toast(
+                self.window,
+                f"已导出 {os.path.basename(out_path)}",
+                kind="success",
+                action_text="打开所在文件夹",
+                on_action=lambda: _reveal_in_file_manager(out_path),
+            )
         except Exception as e:
             messagebox.showerror("导出失败", str(e))
 
@@ -549,7 +581,83 @@ class App:
             if target != current_path:
                 shutil.move(target, current_path)
 
+    # --- Print ---
+
+    def print_document(self):
+        """打印盖章文档：导出到临时文件 → 唤起系统打印（打印机/份数由系统面板接管）。
+
+        提交在线程里跑：osascript 要等系统打印面板的早期反馈（最长数秒），
+        不能卡住 UI；结果经 _dispatch_to_main 回主线程呈现。
+        """
+        if self.handler is None or self.doc_path is None:
+            messagebox.showwarning("提示", "请先打开文档")
+            return
+        if self.instance_manager is None or not self.instance_manager.list_instances():
+            messagebox.showwarning("提示", "请先添加印章到文档")
+            return
+        if self._print_busy:
+            self.window.set_status("正在唤起系统打印，请稍候…")
+            return
+
+        try:
+            out_path = self._prepare_print_file()
+        except Exception as e:
+            logger.exception("打印导出失败")
+            messagebox.showerror("打印失败", str(e))
+            return
+
+        # 打印结果经主线程队列回来，这里必须确保轮询器在跑——
+        # 此前只有 Word 流程会启动它，PDF/图片/Excel 文档下队列
+        # 无人消费，_print_busy 永远不复位（表现为第二次点打印无响应）。
+        self._ensure_main_poller()
+        self._print_busy = True
+        self.window.set_status("正在唤起系统打印…")
+
+        def worker():
+            try:
+                outcome = print_file(out_path)
+            except Exception:  # noqa: BLE001  兜底，绝不外抛
+                logger.exception("打印提交异常")
+                outcome = None
+            self._dispatch_to_main(self._print_finished, outcome)
+
+        threading.Thread(target=worker, daemon=True, name="print").start()
+
+    def _print_finished(self, outcome):
+        self._print_busy = False
+        if outcome is None:
+            self.window.set_status("打印失败（详情见日志）")
+            messagebox.showerror("打印失败", "提交打印时发生内部错误，详情见日志")
+            return
+        self.window.set_status(outcome.message)
+        if outcome.kind == "error":
+            messagebox.showerror("打印失败", outcome.message)
+
+    def _prepare_print_file(self) -> str:
+        """把盖章文档导出到会话临时目录，返回待打印文件路径。
+
+        Windows 的 ShellExecute 打印是异步的（由关联程序读取文件），
+        因此临时文件不做即时删除，随进程退出统一清理。
+        """
+        if self._print_dir is None:
+            self._print_dir = tempfile.mkdtemp(prefix="stamp-print-")
+            atexit.register(shutil.rmtree, self._print_dir, True)
+        original_name = os.path.splitext(os.path.basename(self.doc_path))[0]
+        ext = self.handler.default_output_extension()
+        out_path = os.path.join(self._print_dir, f"{original_name}-已盖章{ext}")
+        self._export_with_instances(out_path)
+        return out_path
+
     # --- Internal ---
+
+    def _update_action_availability(self):
+        """按当前文档/印章状态联动工具栏「导出/打印」的可用态。"""
+        if self.window is None:
+            return
+        has_document = self.handler is not None and self.doc_path is not None
+        has_stamps = bool(self.instance_manager
+                          and self.instance_manager.list_instances())
+        self.window.update_action_states(has_document, has_stamps)
 
     def _refresh_preview(self):
         if not self.pages:
@@ -568,3 +676,5 @@ class App:
                             template_images[inst.template_id] = img
 
         self.window.preview.update_all_pages(self.pages, all_instances, template_images)
+        # 增删印章会改变导出/打印可用性，刷新预览时一并联动
+        self._update_action_availability()

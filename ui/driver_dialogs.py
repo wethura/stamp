@@ -16,7 +16,7 @@ from processing.word_support.driver_manager import (
     DriverError,
     DriverManager,
 )
-from ui.theme import Colors, Fonts
+from ui.theme import Buttons, Colors, Fonts
 
 PHASE_TEXT = {
     "download": "正在下载 LibreOffice…",
@@ -80,7 +80,8 @@ class DriverConfirmDialog(ctk.CTkToplevel):
         self._path.insert(0, str(default_dir))
         self._path.pack(side="left", fill="x", expand=True)
         ctk.CTkButton(
-            row, text="浏览…", width=84, height=36,
+            row, text="浏览…", width=84, height=Buttons.HEIGHT_DIALOG,
+            corner_radius=Buttons.RADIUS,
             fg_color="transparent", border_width=1,
             border_color=Colors.BORDER_SUBTLE,
             hover_color=Colors.SURFACE_OVERLAY,
@@ -96,7 +97,8 @@ class DriverConfirmDialog(ctk.CTkToplevel):
         bottom = ctk.CTkFrame(self, fg_color="transparent")
         bottom.pack(fill="x", padx=24, pady=(18, 18))
         ctk.CTkButton(
-            bottom, text="取消", width=96, height=36,
+            bottom, text="取消", width=96, height=Buttons.HEIGHT_DIALOG,
+            corner_radius=Buttons.RADIUS,
             fg_color="transparent", border_width=1,
             border_color=Colors.BORDER_SUBTLE,
             hover_color=Colors.SURFACE_OVERLAY,
@@ -104,10 +106,11 @@ class DriverConfirmDialog(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.BODY_SIZE),
             command=self._cancel).pack(side="right")
         ctk.CTkButton(
-            bottom, text="下载并安装", width=120, height=36,
+            bottom, text="下载并安装", width=124, height=Buttons.HEIGHT_DIALOG,
+            corner_radius=Buttons.RADIUS,
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
             text_color="white",
-            font=(Fonts.FAMILY, Fonts.BODY_SIZE, "bold"),
+            font=(Fonts.FAMILY, Fonts.BODY_SIZE),
             command=self._ok).pack(side="right", padx=(0, 8))
 
         self.protocol("WM_DELETE_WINDOW", self._cancel)

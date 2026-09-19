@@ -5,7 +5,8 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from processing.stamp import load_stamp
-from ui.theme import Colors, Fonts
+from ui.icons import get_icon
+from ui.theme import Buttons, Colors, Fonts
 
 
 class StampLibraryDialog(ctk.CTkToplevel):
@@ -63,8 +64,11 @@ class StampLibraryDialog(ctk.CTkToplevel):
         self._name = ctk.CTkEntry(editor, height=34, font=(Fonts.FAMILY, Fonts.BODY_SIZE))
         self._name.grid(row=3, column=0, sticky="ew", pady=(0, 8))
         self._replace = ctk.CTkButton(
-            editor, text="替换图片…", height=32,
-            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
+            editor, text=" 替换图片…", height=34,
+            corner_radius=Buttons.RADIUS,
+            image=get_icon("image", Buttons.ICON_SM),
+            compound="left",
+            fg_color="transparent", hover_color=Colors.SURFACE_RAISED,
             text_color=Colors.TEXT_PRIMARY, command=self._replace_image,
         )
         self._replace.grid(row=4, column=0, sticky="w")
@@ -77,13 +81,17 @@ class StampLibraryDialog(ctk.CTkToplevel):
         actions.grid(row=6, column=0, sticky="ew")
         actions.grid_columnconfigure(1, weight=1)
         self._delete = ctk.CTkButton(
-            actions, text="删除印章", width=90, height=34,
-            fg_color=Colors.SURFACE_RAISED, hover_color=Colors.SURFACE_OVERLAY,
+            actions, text=" 删除印章", width=98, height=34,
+            corner_radius=Buttons.RADIUS,
+            image=get_icon("trash", Buttons.ICON_SM, Colors.DANGER),
+            compound="left",
+            fg_color="transparent", hover_color=Colors.SURFACE_RAISED,
             text_color=Colors.DANGER, command=self._delete_selected,
         )
         self._delete.grid(row=0, column=0)
         self._save = ctk.CTkButton(
             actions, text="保存修改", width=110, height=34,
+            corner_radius=Buttons.RADIUS,
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
             text_color="#FFFFFF", command=self._save_selected,
         )
