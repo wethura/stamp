@@ -4,7 +4,6 @@ import tkinter as tk
 import customtkinter as ctk
 from unittest.mock import MagicMock, patch
 
-from tests.gui_support import shared_ctk_root
 from ui.controls_panel import ControlsPanel
 from processing.stamp_manager import StampManager, StampData
 from processing.stamp_instance import StampInstance
@@ -27,15 +26,21 @@ class TestWheelScrollChain(unittest.TestCase):
     """印章列表 ↔ 外层面板的滚轮链路（回归：customtkinter 跨版本崩溃）。"""
 
     def setUp(self):
-        # 按钮图标是 lru_cache 的 CTkImage，绑定首个 root——必须复用
-        # 进程级共享根，逐测自建 root 会触发 pyimage 跨根失效。
-        self.root = shared_ctk_root()
+        # 不用 tests.gui_support 的共享根：本模块在全量顺序里排第 1，
+        # 由它首发共享根会让 CTk 全局追踪器（AppearanceMode/Scaling
+        # 的自续订 after 循环）挂上去，与后续 gui_smoke/word_flow 的
+        # 第二、第三根生命周期叠加后，共享根上的对话框 update() 会
+        # 永不排空（d9a1099 即可复现）。逐测自建 root 维持既有动力学。
+        # 注意：图标改造（lru_cache 的 CTkImage 绑定首个 root）落地时
+        # 需要迁共享根，届时必须连同上述追踪器问题一起解决。
+        self.root = tk.Tk()
+        self.root.withdraw()
         self.panel = ControlsPanel(self.root)
         self.panel.pack()
         self.panel.update_idletasks()
 
     def tearDown(self):
-        self.panel.destroy()
+        self.root.destroy()
 
     @staticmethod
     def _event_on(widget, delta=120):
@@ -80,7 +85,8 @@ class TestDeleteButton(unittest.TestCase):
     """删除按钮相关测试"""
 
     def setUp(self):
-        self.root = shared_ctk_root()
+        self.root = tk.Tk()
+        self.root.withdraw()
         self.panel = ControlsPanel(self.root)
         self.panel.pack()
         self.panel.update_idletasks()
@@ -89,7 +95,7 @@ class TestDeleteButton(unittest.TestCase):
         self.panel.set_stamp_manager(self.mock_manager)
 
     def tearDown(self):
-        self.panel.destroy()
+        self.root.destroy()
 
     def _create_mock_stamp(self, stamp_id, name="测试章"):
         stamp = MagicMock(spec=StampData)
