@@ -432,6 +432,15 @@ def main():
     window = MainWindow(root, app_controller)
     logging.info("主窗口构建完成")
 
+    # OS 文件拖入：整个主窗口注册为拖放目标（tkdnd 不可用时降级为无拖拽）
+    from ui.dnd import enable_file_drop
+    dnd_version = enable_file_drop(root, app_controller.on_file_dropped)
+    if selftest_mode == "full" and not dnd_version:
+        # 打包版必须有拖拽：tkinterdnd2 漏打包时在这里拦下发布
+        print("SELFTEST FAIL: 文件拖入不可用（tkinterdnd2/tkdnd 未正确打包）",
+              flush=True)
+        _finish(1)
+
     _show_main_window(root, window, app_controller)
     logging.info("主窗口已显示，进入主循环")
 

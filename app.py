@@ -8,7 +8,6 @@ from PIL import Image
 from typing import Optional, List, Dict
 import atexit
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -28,6 +27,26 @@ from ui.feedback import show_toast
 from ui.word_dialogs import ConversionProgressDialog, choose_engine
 
 logger = logging.getLogger(__name__)
+
+# macOS TCC 读取拒绝（微信/QQ 容器、桌面/下载等）的用户引导
+_PERMISSION_HINT = (
+    "macOS 未授权读取该文件所在的位置。\n"
+    "从微信、QQ 等应用里直接拖出的文件位于其受保护目录，首次读取会被系统拒绝。\n\n"
+    "任选其一解决：\n"
+    "· 系统设置 → 隐私与安全性 → 完全磁盘访问权限 → 加入并勾选「盖章工具」，"
+    "然后重启应用\n"
+    "· 先在原应用里把文件另存到普通文件夹（如「下载」），再拖入"
+)
+
+
+def _permission_denied(exc) -> bool:
+    """识别系统级读取拒绝（handler 会把异常包成 RuntimeError，只能看文本）。"""
+    if isinstance(exc, PermissionError):
+        return True
+    text = str(exc)
+    return ("Operation not permitted" in text
+            or "Permission denied" in text
+            or "Errno 1]" in text or "Errno 13]" in text)
 
 
 def _reveal_in_file_manager(path: str):
@@ -162,33 +181,35 @@ class App:
         self._load_document(path, handler)
 
     def on_file_dropped(self, drop_data: str):
-        try:
-            paths = shlex.split(drop_data)
-        except ValueError:
-            paths = [drop_data.strip()]
+        """OS 文件拖入入口（ui.dnd 在 <<Drop>> 时回调，主线程执行）。"""
+        from ui.dnd import parse_drop_paths
 
-        paths = [p for p in paths if p]
-
-        if len(paths) > 1:
-            self.window.set_status("请每次拖入一个文件")
-            return
-
+        paths = parse_drop_paths(drop_data, getattr(self.window, "tk", None))
         if not paths:
+            return
+        if len(paths) > 1:
+            self._notify_drop_rejected("请每次拖入一个文件")
             return
 
         path = paths[0]
-        path = path.strip("{}")
-
         if not os.path.exists(path):
-            self.window.set_status("文件不存在")
+            self._notify_drop_rejected(f"文件不存在：{path}")
             return
 
         handler = HandlerRegistry.get_handler(path)
         if handler is None:
-            self.window.set_status("不支持的文件格式")
+            self._notify_drop_rejected(f"不支持的文件格式：{path}")
             return
 
         self._load_document(path, handler)
+
+    def _notify_drop_rejected(self, message: str):
+        """拖入被拒：状态栏留痕 + 右下角 Toast 提示，不打断操作。"""
+        self.window.set_status(message)
+        try:
+            show_toast(self.window, message, kind="error")
+        except Exception:  # noqa: BLE001  提示渲染失败不影响状态栏留痕
+            logger.warning("拖入拒绝提示显示失败", exc_info=True)
 
     def _load_document(self, path: str, handler):
         if isinstance(handler, WordHandler):
@@ -202,7 +223,12 @@ class App:
             pages = [handler.render_page(i) for i in range(handler.page_count())]
             self._activate_document(path, handler, pages)
         except Exception as e:
-            messagebox.showerror("加载失败", str(e))
+            if _permission_denied(e):
+                logger.warning("读取被系统拒绝（权限/TCC）: %s", path)
+                self.window.set_status("没有权限读取该文件（详见弹窗）")
+                messagebox.showerror("没有文件访问权限", _PERMISSION_HINT)
+            else:
+                messagebox.showerror("加载失败", str(e))
 
     def _activate_document(self, path: str, handler, pages: List[Image.Image]):
         """Switch the session to a freshly loaded document (UI thread only)."""
@@ -374,6 +400,10 @@ class App:
 
     def _report_word_open_failure(self, title: str, detail: str, offer_manual=False):
         logger.error("%s: %s", title, detail)
+        if _permission_denied(detail):
+            self.window.set_status("没有权限读取该文件（详见弹窗）")
+            messagebox.showerror("没有文件访问权限", _PERMISSION_HINT)
+            return
         self.window.set_status(f"{title}（详情见日志）")
         if offer_manual and messagebox.askyesno(
                 title, f"{detail}\n\n是否改为手动导入已导出的 PDF？"):

@@ -151,9 +151,6 @@ class PreviewCanvas(ctk.CTkFrame):
         # Focus on hover for keyboard events
         self.canvas.bind("<Enter>", lambda e: self.canvas.focus_set())
 
-        # File drop via tkinterdnd2
-        self._setup_file_drop()
-
     # ── Public API ───────────────────────────────────────────────────
 
     def update_all_pages(self, pages: List[Image.Image],
@@ -623,35 +620,3 @@ class PreviewCanvas(ctk.CTkFrame):
     def _delete_selected(self):
         if self._selected_instance_id and self.on_delete_instance:
             self.on_delete_instance(self._selected_instance_id)
-
-    # ── File Drop ────────────────────────────────────────────────────
-
-    def _setup_file_drop(self):
-        """Register canvas for OS-level file drag-drop."""
-        try:
-            from tkinterdnd2 import DND_FILES
-            self.canvas.drop_target_register(DND_FILES)
-            self.canvas.dnd_bind("<<Drop>>", self._on_file_drop)
-            return
-        except (ImportError, tk.TclError):
-            pass
-
-        try:
-            self.canvas.tk.call('tkdnd::drop_target', 'register', self.canvas._w, 'DND_Files')
-            self.canvas.tk.call('bind', self.canvas._w, '<<Drop>>',
-                                f'[list {self.canvas._w}._on_tkdnd_drop %D]')
-            self.canvas._on_tkdnd_drop = lambda data: self._on_file_drop_raw(data)
-        except tk.TclError:
-            pass
-
-    def _on_file_drop(self, event):
-        """Handle OS file drop onto the canvas."""
-        toplevel = self.winfo_toplevel()
-        if hasattr(toplevel, 'controller') and hasattr(toplevel.controller, 'on_file_dropped'):
-            toplevel.controller.on_file_dropped(event.data)
-
-    def _on_file_drop_raw(self, data: str):
-        """Handle OS file drop from raw Tcl tkdnd."""
-        toplevel = self.winfo_toplevel()
-        if hasattr(toplevel, 'controller') and hasattr(toplevel.controller, 'on_file_dropped'):
-            toplevel.controller.on_file_dropped(data)

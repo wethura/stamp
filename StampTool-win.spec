@@ -13,6 +13,9 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 hiddenimports += ['pythoncom', 'win32com.client', 'pywintypes', 'win32timezone']
 # 引擎探测用 winreg 读注册表检测 Office/WPS 安装（函数内延迟导入）
 hiddenimports += ['winreg']
+# 文件拖入：tkinterdnd2 携带各平台 tkdnd 二进制与 Tcl 脚本，缺一则拖拽静默失效
+tmp_ret = collect_all('tkinterdnd2')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(

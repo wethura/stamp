@@ -6,6 +6,9 @@ binaries = []
 hiddenimports = []
 tmp_ret = collect_all('pymupdf')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# 文件拖入：tkinterdnd2 携带各平台 tkdnd 二进制与 Tcl 脚本，缺一则拖拽静默失效
+tmp_ret = collect_all('tkinterdnd2')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(

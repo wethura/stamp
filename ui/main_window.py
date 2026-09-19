@@ -100,7 +100,7 @@ class MainWindow(ctk.CTkFrame):
         # 悬停说明：动作按钮的提示随可用性切换（见 update_action_states）
         self._export_tooltip = Tooltip(self._export_btn, _EXPORT_TIP_NO_DOC)
         self._print_tooltip = Tooltip(self._print_btn, _PRINT_TIP_NO_DOC)
-        Tooltip(open_btn, "打开 PDF / 图片 / Excel / Word 文档\n也可以直接把文件拖进左侧预览区")
+        Tooltip(open_btn, "打开 PDF / 图片 / Excel / Word 文档\n也可以把文件直接拖进窗口打开")
         Tooltip(settings_btn, "Word 转换引擎等偏好设置")
 
         # 初始没有文档：导出/打印置灰，提示先做什么而不是点击后弹警告
