@@ -288,6 +288,6 @@ jobs:
             gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
           fi
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
-            --title "StampTool $tag" --latest \
+            --title "$tag" --latest \
             --notes-file release-body.md artifacts/StampTool-*
 
