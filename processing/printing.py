@@ -19,17 +19,70 @@ import os
 import subprocess
 import sys
 import time
-from typing import NamedTuple
+from typing import List, NamedTuple
 
 logger = logging.getLogger(__name__)
 
 _DIALOG_ACK_S = 5.0       # osascript 早失败侦测窗口；面板开着属于正常
 _DOC_READY_S = 6.0        # 等待 Preview 打开文档（冷启动需数秒）
+_WIN_DIALOG_WAIT_S = 600.0  # Windows 打印面板等待上限（面板属于本进程，不能 kill）
+_PS_EXIT_CANCEL = 3       # PowerShell 约定：用户在打印面板点了取消
 _LP_TIMEOUT_S = 30.0      # lp 提交：正常瞬时完成，CUPS 忙时留余量
 
 # 可直接交给打印管线的格式；xlsx 等办公格式改为用默认程序打开
 _PRINTABLE_EXT = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp",
                   ".tif", ".tiff"}
+
+# Windows：标准打印对话框（System.Windows.Forms.PrintDialog）+ GDI+ 位图
+# 打印。渲染页图由 Python 侧完成后把路径嵌进脚本；-STA 是 WinForms 对话
+# 框的硬性要求；exit 3 = 用户取消。
+_WIN_PRINT_PS_TEMPLATE = r"""
+$ErrorActionPreference = 'Stop'
+$pages = @(
+__PAGE_LINES__
+)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$dlg = New-Object System.Windows.Forms.PrintDialog
+$dlg.UseEXDialog = $true
+$dlg.AllowSomePages = $true
+$doc = New-Object System.Drawing.Printing.PrintDocument
+$doc.DocumentName = '__JOB_NAME__'
+$dlg.Document = $doc
+if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 3 }
+
+$settings = $doc.PrinterSettings
+if ($settings.MinimumPage -lt 1) { $settings.MinimumPage = 1 }
+if ($settings.MaximumPage -lt $pages.Count) { $settings.MaximumPage = $pages.Count }
+$first = 1
+$last = $pages.Count
+if ($settings.PrintRange -eq [System.Drawing.Printing.PrintRange]::Pages) {
+  $first = [Math]::Max(1, $settings.FromPage)
+  $last = [Math]::Min($pages.Count, $settings.ToPage)
+}
+
+$script:pages = $pages
+$script:idx = $first - 1
+$script:last = $last - 1
+$doc.add_PrintPage({
+  param($sender, $e)
+  $img = [System.Drawing.Image]::FromFile($script:pages[$script:idx])
+  try {
+    $bounds = $e.MarginBounds
+    $scale = [Math]::Min($bounds.Width / $img.Width, $bounds.Height / $img.Height)
+    $w = $img.Width * $scale
+    $h = $img.Height * $scale
+    $x = $bounds.X + ($bounds.Width - $w) / 2
+    $y = $bounds.Y + ($bounds.Height - $h) / 2
+    $e.Graphics.DrawImage($img, [single]$x, [single]$y, [single]$w, [single]$h)
+  } finally { $img.Dispose() }
+  $script:idx++
+  $e.HasMorePages = ($script:idx -le $script:last)
+})
+$doc.Print()
+exit 0
+"""
 
 
 class PrintOutcome(NamedTuple):
@@ -158,18 +211,80 @@ def _open_with_default_app_posix(path: str) -> PrintOutcome:
                         "该格式需由默认程序打印：已打开，请在其中打印（⌘P）")
 
 
-def _print_windows(path: str) -> PrintOutcome:
-    import win32api
+def _render_pdf_pages(pdf_path: str, out_dir: str, dpi: int = 200) -> List[str]:
+    """把 PDF 每页渲染为 PNG（Windows 打印对话框经 GDI+ 打位图）。"""
+    import fitz
 
-    directory = os.path.dirname(path) or "."
+    zoom = dpi / 72.0
+    pages = []
+    with fitz.open(pdf_path) as doc:
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+            out = os.path.join(out_dir, f"print-page-{i + 1:03d}.png")
+            pix.save(out)
+            pages.append(out)
+    return pages
+
+
+def _build_windows_print_script(pages: List[str], job_name: str) -> str:
+    def ps_quote(text: str) -> str:
+        return text.replace("'", "''")
+
+    lines = ",\n".join(f"    '{ps_quote(p)}'" for p in pages)
+    return (_WIN_PRINT_PS_TEMPLATE
+            .replace("__PAGE_LINES__", lines)
+            .replace("__JOB_NAME__", ps_quote(job_name)))
+
+
+def _print_windows(path: str) -> PrintOutcome:
+    """Windows：标准打印对话框确认后才打印（绝不静默直打）。
+
+    旧实现用 ShellExecute 的 print 动词——多数 PDF 关联程序下它不经
+    任何确认直打默认打印机（2026-09-19 用户实机报告），已弃用。
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext != ".pdf":
+        # xlsx 等交给关联程序（Excel/WPS），用户在其中打印
+        return _open_with_default_app_windows(path)
+
     try:
-        result = win32api.ShellExecute(0, "print", path, None, directory, 0)
-    except Exception as exc:  # noqa: BLE001  关联程序缺失/动作未注册等
-        logger.warning("ShellExecute print 失败: %s", exc)
-        result = 0
-    # ShellExecute 返回值 > 32 表示成功；打印细节由关联程序接管
-    if isinstance(result, int) and result > 32:
-        return PrintOutcome(True, "queued", "已提交系统打印")
+        pages = _render_pdf_pages(path, os.path.dirname(path))
+    except Exception:  # noqa: BLE001  渲染失败不阻断：退回打开文件
+        logger.exception("打印页图渲染失败，退回用默认程序打开")
+        return _open_with_default_app_windows(path)
+
+    script_path = os.path.join(os.path.dirname(path), "print-dialog.ps1")
+    # utf-8-sig：PowerShell 5.1 对无 BOM 文件按 ANSI 解析，中文页名会乱
+    with open(script_path, "w", encoding="utf-8-sig") as f:
+        f.write(_build_windows_print_script(pages, os.path.basename(path)))
+
+    try:
+        proc = subprocess.Popen(
+            ["powershell", "-NoProfile", "-STA", "-NonInteractive",
+             "-ExecutionPolicy", "Bypass", "-File", script_path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except FileNotFoundError:
+        return _open_with_default_app_windows(path)
+
+    try:
+        _, err = proc.communicate(timeout=_WIN_DIALOG_WAIT_S)
+    except subprocess.TimeoutExpired:
+        # 对话框还开着（用户在挑打印机/份数）。与 macOS 不同，面板属于
+        # 本进程——kill 会连对话框一起关掉，因此只 detach 等其自然退出。
+        return PrintOutcome(True, "dialog",
+                            "已打开系统打印窗口，请在其中确认打印")
+
+    if proc.returncode == 0:
+        return PrintOutcome(True, "queued", "打印已交由系统处理")
+    if proc.returncode == _PS_EXIT_CANCEL:
+        return PrintOutcome(True, "cancelled", "已取消打印")
+    detail = (err or "").strip().splitlines()
+    detail = detail[-1] if detail else f"powershell 退出码 {proc.returncode}"
+    logger.warning("Windows 打印对话框失败: %s", detail)
+    return _open_with_default_app_windows(path)
+
+
+def _open_with_default_app_windows(path: str) -> PrintOutcome:
     os.startfile(path)  # noqa: S316  与系统约定的标准打开方式
     return PrintOutcome(True, "opened", "已用默认程序打开，请在其中打印")
 

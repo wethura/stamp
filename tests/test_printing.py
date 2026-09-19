@@ -1,9 +1,12 @@
 """printing 模块单元测试：把文件交给系统打印管线的平台分支（系统调用全部桩掉）。"""
 import os
+import shutil
 import subprocess
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
+
+from PIL import Image
 
 from processing import printing
 
@@ -185,26 +188,126 @@ class TestPrintPosix(unittest.TestCase):
 
 
 class TestPrintWindows(unittest.TestCase):
-    def _win32api(self, shell_result):
-        mock = MagicMock()
-        mock.ShellExecute.return_value = shell_result
-        return mock
+    """Windows：标准打印对话框确认后才打印（绝不静默直打）。
 
-    def test_print_verb_delegates_to_system(self):
-        api = self._win32api(33)
-        with patch.dict(sys.modules, {"win32api": api}):
-            outcome = printing._print_windows(r"C:\tmp\a.pdf")
-        args = api.ShellExecute.call_args[0]
-        self.assertEqual(args[1], "print")
+    回归（2026-09-19 用户实机报告）：旧 ShellExecute print 动词在多数
+    PDF 关联程序下不经确认直打默认打印机。
+    """
+
+    def _tmp_pdf(self, name="合同-已盖章.pdf"):
+        import tempfile
+        import fitz
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        pdf = os.path.join(tmpdir, name)
+        with fitz.open() as doc:
+            doc.new_page(width=595, height=842)
+            doc.new_page(width=595, height=842)
+            doc.save(pdf)
+        return tmpdir, pdf
+
+    def _patch_popen(self, **proc_attrs):
+        proc = MagicMock()
+        for key, value in proc_attrs.items():
+            setattr(proc, key, value)
+        proc.communicate.return_value = ("", "")
+        patcher = patch("processing.printing.subprocess.Popen")
+        popen = patcher.start()
+        popen.return_value = proc
+        self.addCleanup(patcher.stop)
+        return popen, proc
+
+    @patch("os.startfile", create=True)
+    def test_confirm_prints_via_system_dialog(self, startfile):
+        tmpdir, pdf = self._tmp_pdf()
+        popen, _ = self._patch_popen(returncode=0)
+        outcome = printing._print_windows(pdf)
+        cmd = popen.call_args[0][0]
+        self.assertEqual(cmd[0], "powershell")
+        self.assertIn("-STA", cmd, "WinForms 对话框必须 -STA")
+        self.assertTrue(cmd[-1].endswith("print-dialog.ps1"))
+        script_path = cmd[-1]
+        with open(script_path, encoding="utf-8-sig") as f:
+            script = f.read()
+        self.assertIn("print-page-001.png", script)
+        self.assertIn("print-page-002.png", script)
+        self.assertIn("PrintDialog", script)
         self.assertEqual(outcome.kind, "queued")
+        startfile.assert_not_called()
 
-    def test_verb_failure_falls_back_to_open(self):
-        api = self._win32api(31)  # SE_ERR_NOASSOC：关联程序未注册 print 动词
-        with patch.dict(sys.modules, {"win32api": api}), \
-             patch("os.startfile", create=True) as startfile:
-            outcome = printing._print_windows(r"C:\tmp\a.pdf")
-        startfile.assert_called_once_with(r"C:\tmp\a.pdf")
+    @patch("os.startfile", create=True)
+    def test_user_cancel_is_not_error(self, startfile):
+        tmpdir, pdf = self._tmp_pdf()
+        self._patch_popen(returncode=printing._PS_EXIT_CANCEL)
+        outcome = printing._print_windows(pdf)
+        self.assertTrue(outcome.ok)
+        self.assertEqual(outcome.kind, "cancelled")
+        startfile.assert_not_called()
+
+    @patch("os.startfile", create=True)
+    def test_ps_failure_falls_back_to_open(self, startfile):
+        tmpdir, pdf = self._tmp_pdf()
+        proc_attrs = {"returncode": 1}
+        popen, proc = self._patch_popen(**proc_attrs)
+        proc.communicate.return_value = ("", "some ps error")
+        outcome = printing._print_windows(pdf)
+        startfile.assert_called_once_with(pdf)
         self.assertEqual(outcome.kind, "opened")
+
+    def test_open_dialog_must_not_be_killed_on_timeout(self):
+        """面板属于 powershell 进程：等待超时时 kill 会连面板一起关掉。"""
+        tmpdir, pdf = self._tmp_pdf()
+        _, proc = self._patch_popen(returncode=0)
+        proc.communicate.side_effect = subprocess.TimeoutExpired(
+            "powershell", 600)
+        outcome = printing._print_windows(pdf)
+        self.assertEqual(outcome.kind, "dialog")
+        proc.kill.assert_not_called()
+
+    @patch("os.startfile", create=True)
+    def test_office_format_opens_with_default_app(self, startfile):
+        with patch("processing.printing.subprocess.Popen") as popen:
+            outcome = printing._print_windows(r"C:\tmp\报表-已盖章.xlsx")
+        popen.assert_not_called()
+        startfile.assert_called_once_with(r"C:\tmp\报表-已盖章.xlsx")
+        self.assertEqual(outcome.kind, "opened")
+
+    @patch("os.startfile", create=True)
+    def test_render_failure_falls_back_to_open(self, startfile):
+        tmpdir, pdf = self._tmp_pdf()
+        with patch.object(printing, "_render_pdf_pages",
+                          side_effect=OSError("fitz broken")), \
+             patch("processing.printing.subprocess.Popen") as popen:
+            outcome = printing._print_windows(pdf)
+        popen.assert_not_called()
+        startfile.assert_called_once_with(pdf)
+
+
+class TestPdfPageRendering(unittest.TestCase):
+    def test_renders_every_page_in_order(self):
+        import tempfile
+        import fitz
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        pdf = os.path.join(tmpdir, "a.pdf")
+        with fitz.open() as doc:
+            doc.new_page(width=595, height=842)
+            doc.new_page(width=595, height=842)
+            doc.save(pdf)
+        pages = printing._render_pdf_pages(pdf, tmpdir)
+        self.assertEqual(len(pages), 2)
+        for i, page in enumerate(pages, start=1):
+            self.assertTrue(os.path.exists(page))
+            self.assertIn(f"print-page-{i:03d}.png", page)
+            with Image.open(page) as img:
+                self.assertGreater(img.width, 1500, "页图应为打印级分辨率")
+
+    def test_script_embeds_pages_and_escapes_quotes(self):
+        script = printing._build_windows_print_script(
+            ["/tmp/a'b/page-001.png", "/tmp/a'b/page-002.png"],
+            "合同-已盖章.pdf")
+        self.assertIn("''b/page-001.png", script)   # 单引号转义为两个
+        self.assertIn("DocumentName = '合同-已盖章.pdf'", script)
 
 
 class TestPrintFileGuard(unittest.TestCase):
