@@ -80,7 +80,11 @@ class TestPrintMacos(unittest.TestCase):
         self.assertTrue(open_calls, "应先 open 唤起 Preview")
         script = popen.call_args[0][0][2]
         self.assertIn("first document whose path is", script)
-        self.assertIn(os.path.realpath("/tmp/合同-已盖章.pdf"), script)
+        # 期望值须与代码同构地转义（Windows CI 上 realpath 产生反斜杠，
+        # 脚本里是双反斜杠，直接比对 realpath 必挂）
+        expected = (os.path.realpath("/tmp/合同-已盖章.pdf")
+                    .replace("\\", "\\\\").replace('"', '\\"'))
+        self.assertIn(expected, script)
         self.assertIn("with print dialog", script)
         self.assertTrue(outcome.ok)
         self.assertEqual(outcome.kind, "dialog")
